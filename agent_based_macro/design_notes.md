@@ -16,6 +16,27 @@ try to sell at a profit.
 The firm logic is straightforward: figure out cost of production, try to sell at a markup,
 but might be forced into fire sales because of liquidity needs.
 
+**Design Headaches**
+
+The decision to make it possible to put the simulation into a game creates a few headaches.
+
+- Although currently running in a single process, objective is to make it portable to a
+client/server version. Although more useful for gaming, someone who wants a really detailed
+  simulation can use this to offload processing to client machines.
+  
+- We need to finish any processing task within a frame (unless we push the processing to a 
+  client). This means that everything has to be broken up into small events.
+  
+- The time axis for a game is somewhat arbitrary. We do not know the exact simulation time any
+event will be processed at. Breaking up events in this way could create accounting identity 
+  violations (unless we refuse to allow the simulation to advance if there are current events
+  still in the queue).
+
+However, there is one advantage, even for "serious" applications: use the client interface to 
+view what is happening in the simulation in real time. The simulation is going to generate a 
+firehose of events and data, and getting them into a format that can be processed using 
+statistical tools will be a challenge. 
+
 **Households and Central Government**
 
 The central government runs a Job Guarantee (yay!) so every worker is always employed, they 
@@ -74,7 +95,7 @@ and "free money" holdings. (Update: store as "reserved" money.) The following ac
 the household sector provides backstop bids below the best bid (which is the focus of noise
   trading.)
   
-- For each worker, firms have to hold 7 days wages in reserve. Firing a worker triggers a 5-day
+- For each worker, firms have to hold 15 days wages in reserve. Firing a worker triggers a 5-day
 separation payment. If paying wages would drop a firm's free cash levels to negative levels, 
   workers are automatically fired until the reserve is restored. Obviously, firms have a 
   planning event that adjusts strategy to avoid this.

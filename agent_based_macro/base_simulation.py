@@ -237,6 +237,50 @@ class Agent(simulation.Entity):
                 raise ValueError('Must specify valid reserve type')
             self.ReserveMoney += change
 
+    def RegisterEvents(self):
+        """
+        Called by the simulation.
+
+        Each Agent registers a number of repeated events that will be added to the queue
+        by the Simulation.
+
+        (This might migrate to Entity.)
+
+
+
+        These include:
+        Events that define the "economic rules" for the Agent - no behavioral input.
+        - Wage payment cycle. (pay workers, workers start working.)
+        - The JobGuarantee worker migration step.
+        - Tax payment step
+        - Household sector consumption step.
+
+        Production events - some might be scheduled (just before decision events), others generated
+        dynamically based on when units are produced (?).
+
+        Behavioural Events
+        - Daily planning event (e.g., set target workforce, wages, market orders, etc.)
+        - Liquidity management event before wage/tax payments. (Do we need to raise cash?)
+        - Events set by the "behavioral AI logic": market orders being filled, reaction to production,
+          periodic ticks to look at market pricing to adjust orders, etc.
+
+
+        Possible protocol:
+        ((action1, ... actionN), (first_start, first_end), repeat)
+        actions = list of actions, will be called in order.
+        (first_start, first_end) = range of times for first call. Once we have a lot of entities, spread out
+                                   the events for a class across the range.
+                                   (If we have all the events at the exact same time, time will freeze in realtime
+                                   mode.)
+        repeat = repeat period (typically 1. (daily) or 10. (monthly). Event will be re-inserted with the CallTime
+        incremented by the repeat value.
+
+        (The GID will be filled in by the Simulation.)
+
+        :return: tuple
+        """
+        return ()
+
 
 class ProducerLabour(Agent):
     """
@@ -347,6 +391,13 @@ class JobGuarantee(Agent):
             if ent.Type == 'agent' and ent.LocationID == self.LocationID:
                 if ent.IsEmployer:
                     self.EmployerDict[ent.GID] = ent
+
+    def RegisterEvents(self):
+        """
+
+        :return: list
+        """
+        return [(('Payment'), (0., 0.1), 1.)]
 
 
 

@@ -108,10 +108,13 @@ class Event(object):
 
     Once popped, the entity with GID will have its method event_{Action}(args) called.
     """
-    def __int__(self, gid, action, calltime, args):
+    def __int__(self, gid, action, calltime, repeat, args):
         self.GID = gid
         self.Action = action
         self.CallTime = calltime
+        # If None, does not repeat. Otherwise, framework will reinsert with the CallTime incremented by Repeat.
+        # I.e., if repeat = 1, repeat daily.
+        self.Repeat = repeat
         self.args = args
 
     def __lt__(self, other):
@@ -247,9 +250,28 @@ class Simulation(Entity):
         if self.TimeMode == 'realtime':
             if self.IsPaused:
                 return
-            oldbase = self.MonotonicBase
-            self.MonotonicBase = time.monotonic()
-            self.Time += (self.MonotonicBase - oldbase) / self.DayLength
+            if len(Simulation.EventList) > 0:
+                first_event = Simulation.EventList[0].CallTime
+                if self.Time >= first_event:
+                    # If we have a current event, do not allow time to increment.
+                    return
+                new_base = time.monotonic()
+                new_time = self.Time + (new_base - self.MonotonicBase) / self.DayLength
+                if new_time < first_event:
+                    self.Time = new_time
+                    self.MonotonicBase = new_base
+                else:
+                    # Only step up to the first event.
+                    self.Time = first_event
+                    # For now, rebase to the current time. This means that the game clock slows down
+                    # versus where it is supposed to be if processing had flowed smoothly.
+                    # Possibly attempt to catch up - move the base backwards?
+                    self.MonotonicBase = new_base
+            else:
+                oldbase = self.MonotonicBase
+                self.MonotonicBase = time.monotonic()
+                self.Time += (self.MonotonicBase - oldbase) / self.DayLength
+
         else:
             raise ValueError('Cannot call IncrementTime() in "sim" mode')
 
