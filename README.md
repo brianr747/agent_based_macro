@@ -5,7 +5,7 @@ This is extremely preliminary. I am putting this up here to give myself a backup
 
 There are design notes in the project file, but they are somewhwat rambling theorycrafting
 for my own purposes. It is possible that I will drop working on this project, and those
-notes are to allow me to get back to what I want.
+notes are to allow me to get back into the design.
 
 Note that this project by itself is just core simulation classes, and they are not tied together
 into a simulation. That is being done in the separate "spacetrader" project. 

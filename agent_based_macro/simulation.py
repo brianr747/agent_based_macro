@@ -39,6 +39,9 @@ Simulation event objects and placed into the Simulation Event queue.
 from bisect import insort_right
 import weakref
 import time
+import math
+
+import agent_based_macro.utils as utils
 
 lastGID = 0
 GEntityDict = weakref.WeakValueDictionary()
@@ -70,13 +73,25 @@ class Entity(object):
         so I am adding the validation.
 
         :param GID:
-        :return:
+        :return: Entity
         """
         global GEntityDict
         out = GEntityDict[GID]
         if out.IsDead:
             raise KeyError(f'Entity [{GID}] is marked as dead')
         return out
+
+    @staticmethod
+    def GetSimulation():
+        """
+        Get the Simulation object.
+
+        (Should not be called on "client-side" code, but is needed within the Simulation itself.)
+
+        :return: Simulation
+        """
+        global SIMULATIONID
+        return Entity.GetEntity(SIMULATIONID)
 
 
 def AddEntity(entity):
@@ -100,6 +115,7 @@ def ResetEntities():
     lastGID = 0
     GEntityDict = weakref.WeakValueDictionary()
 
+
 class Event(object):
     """
     Event object.
@@ -108,7 +124,7 @@ class Event(object):
 
     Once popped, the entity with GID will have its method event_{Action}(args) called.
     """
-    def __int__(self, gid, action, calltime, repeat, args):
+    def __init__(self, gid, action, calltime, repeat, *args):
         self.GID = gid
         self.Action = action
         self.CallTime = calltime
@@ -121,16 +137,14 @@ class Event(object):
         return self.CallTime < other.CallTime
 
     def __call__(self):
-        try:
-            entity = Entity.GetEntity(self.GID)
-        except KeyError:
-            # Entity is gone baby gone
-            return
-        meth = getattr(entity, f'event_{self.Action}')
-        args = self.args
-        return meth(*args)
+        # This might throw a KeyError, if the entity is gone. Calling Simulation will eat this.
+        # It needs to know so that the Event is not put back in the queue if it's a repeater...
+        entity = Entity.GetEntity(self.GID)
+        # meth = getattr(entity, f'event_{self.Action}')
+        # args = self.args
+        return self.Action(*self.args)
 
-def PostEvent(event):
+def QueueEvent(event):
     """
     Insert an Event object into the (global) event queue.
 
@@ -155,11 +169,6 @@ class Client(object):
         """
         cmd.ClientID = self.ClientID
         self.Simulation.ClientCommands.append(cmd)
-
-
-
-
-
 
 
 class Simulation(Entity):
@@ -192,6 +201,8 @@ class Simulation(Entity):
         self.DayLength = 20.
         # Base time for time.monotonic(). Only set once TimeStart() command is given
         self.MonotonicBase = None
+        # Reset the jitter so that the simulation creation is "deterministic"
+        utils.reset_jitter()
         # Dict of clients
         self.ClientDict = {}
         # Queue for commands from clients
@@ -208,6 +219,35 @@ class Simulation(Entity):
 
     def AddEntity(self, entity):
         self.EntityList.append(entity)
+        if hasattr(entity, 'RegisterEvents'):
+            print('bink!')
+            evnt_list = entity.RegisterEvents()
+            for (event, first_time) in evnt_list:
+                # first time is a range for the first event; use the jitter_time() function to
+                # put it at a "semi-random" point within the interval. This way we do not have a huge spike of
+                # events during the day. All actions for an entity are done at the same simulation time, in
+                # specified order. This way Entities can ensure a phased logic.
+                actual_time = utils.jitter_time(first_time)
+                if actual_time < self.Time:
+                    actual_time += math.floor(self.Time)
+                    # Corner case
+                    if actual_time < self.Time:
+                        actual_time += 1.
+                event.CallTime = actual_time
+                QueueEvent(event)
+
+    def QueueEventDelay(self, GID, action, delay, *args):
+        """
+        Queue an event with a delay versus current time. Does not repeat.
+        :param GID: int
+        :param action:
+        :param delay: int
+        :param args:
+        :return:
+        """
+        event = Event(GID, action, self.Time + delay, None, *args)
+        QueueEvent(event)
+
 
     def GetEntity(self, GID):
         """
@@ -230,7 +270,23 @@ class Simulation(Entity):
             self.ProcessClientMessageQueue()
             return True
         # Process events...
+        if len(self.EventList) > 0:
+            if self.Time >= self.EventList[0].CallTime:
+                event = self.EventList.pop(0)
+                try:
+                    event()
+                except KeyError:
+                    # The Entity was dead or disappeared. Do nothing (so is no longer REPEATed).
+                    # Return True, since we did have an Event in the queue.
+                    return True
+                if event.Repeat is not None:
+                    if event.Repeat < 0.01:
+                        raise ValueError('Cannot have so close a repeat value!')
+                    event.CallTime = event.CallTime + event.Repeat
+                    QueueEvent(event)
 
+
+                return True
         # Return False if nothing happened.
         return False
 

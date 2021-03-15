@@ -26,6 +26,7 @@ between locations.
 import bisect
 import weakref
 import enum
+import math
 
 from agent_based_macro.simulation import SimulationError
 import agent_based_macro.simulation as simulation
@@ -118,6 +119,88 @@ class ReserveType(enum.Enum):
     ORDERS = 1
     TAX = 2
     WAGES = 3
+
+class InventoryInfo(object):
+    def __init__(self, commodity_ID):
+        self.CommodityID = commodity_ID
+        self.Amount = 0
+        self.Cost = 0
+        self.Reserved = 0
+
+    def AddInventory(self, amount, cost):
+        """
+        Add to inventory.
+
+        Although it seems like an unusual use, allow for amount=0 and a non-zero cost. Allows valuation adjustments,
+
+        :param amount: int
+        :param cost: int
+        :return:
+        """
+        if amount < 0:
+            raise ValueError('Cannot add negative amounts! to inventory')
+        self.Amount += amount
+        self.Cost += cost
+
+    def ChangeReserves(self, amount):
+        """
+        Change the reserved amount. May be positive or negative.
+        :param amount: int
+        :return:
+        """
+        if amount + self.Reserved > self.Amount:
+            raise ValueError('Attempting to reserve more than exists')
+        self.Reserved += amount
+        if self.Reserved < 0:
+            raise ValueError('Attempting to set negative reserves')
+
+    def RemoveInventory(self, amount, from_reserve=False):
+        """
+        Remove inventory units, returns the Cost Of Goods Sold (COGS)
+
+        Throws a ValueError if attempt to remove more than exists, or more than unreserved inventory
+        :param amount: int
+        :return: int
+        """
+        if amount < 0:
+            raise ValueError('Cannot remove negative amounts from inventory')
+        if amount > self.Amount:
+            raise ValueError('Attempting to remove more than exists')
+        if not from_reserve:
+            if amount > self.Amount - self.Reserved:
+                raise ValueError('Attempting to remove reserved inventory')
+        else:
+            if amount > self.Reserved:
+                raise ValueError('Attempting to remove more than reserved')
+            self.Reserved -= amount
+        if amount == self.Amount:
+            COGS = self.Cost
+        else:
+            COGS = round(float(self.Cost*amount)/float(self.Amount))
+        self.Cost -= COGS
+        self.Amount -= amount
+        return COGS
+
+class Inventory(object):
+    """
+    Container object to hold all inventory information.
+    Not an Entity, since will always be embedded in an Entity.
+    """
+    def __init__(self):
+        # We can have multiple commodities in inventory, store all information
+        # on a per-commodity basis.
+        self.Commodities = {}
+
+    def __getitem__(self, item):
+        """
+        Get the commodity info
+        :param item: int
+        :return: InventoryInfo
+        """
+        if item not in self.Commodities:
+            # If we were cautious, validate that "item" is a commodityID
+            self.Commodities[item] = InventoryInfo(item)
+        return self.Commodities[item]
 
 
 class Agent(simulation.Entity):
@@ -310,10 +393,8 @@ class ProducerLabour(Agent):
         # Number of workers on the next day, determined by worker migration step
         # Worker migration done in (0, .1) interval.
         self.WorkersNextDay = 0
-        # How many units in inventory (int)
-        self.Inventory = 0
-        # Cost of Inventory (int)
-        self.InventoryCost = 0
+        # Inventory manager
+        self.Inventory = Inventory()
         # Production level = float, updated during production events. Once > 1.0, add integer part to Inventory
         self.Production = 0.0
         # Wages are not expensed, they are capitalised into inventory cost.
@@ -363,11 +444,15 @@ class JobGuarantee(Agent):
     """
     Although ech planet has its own agent, transactions use the central government money account.
     """
-    def __init__(self, location_id, central_gov_ID, num_workers=0):
+    def __init__(self, location_id, central_gov_ID, job_guarantee_wage, num_workers=0):
         super().__init__(money_balance=0, name='JobGuarantee', location_ID=location_id)
         self.CentralGovID = central_gov_ID
         self.WorkersActual = num_workers
         self.Employer = True
+        self.Inventory = Inventory()
+        self.JobGuaranteeWage = job_guarantee_wage
+        # Will find the HouseholdGID later...
+        self.HouseholdGID = None
         self.EmployerDict = weakref.WeakValueDictionary()
 
     def SpendMoney(self, amount, from_reserve=ReserveType.NONE):
@@ -397,8 +482,53 @@ class JobGuarantee(Agent):
 
         :return: list
         """
-        return [(('Payment'), (0., 0.1), 1.)]
+        payment_event = simulation.Event(self.GID, self.event_Payment, 0., 1.)
+        return [(payment_event, (0., 0.1))]
 
+    def event_Payment(self):
+        sim = simulation.Entity.GetSimulation()
+        if self.HouseholdGID is None:
+            try:
+                self.HouseholdGID = sim.Households[self.LocationID]
+            except KeyError:
+                raise ValueError('Did not add the Household to the simulation.')
+        # Since the HouseholdSector and central government are indestructible (I hope), this transfer will always
+        # be valid. (Normally, need to validate existence of all entities.)
+        payment = self.WorkersActual * self.JobGuaranteeWage
+        self.SpendMoney(payment)
+        HH = simulation.Entity.GetEntity(self.HouseholdGID)
+        HH.ReceiveWages(payment)
+        # JG Production
+        food_id = sim.GetCommodityByName('Fud')
+        production = self.WorkersActual * 15
+        self.Inventory[food_id].AddInventory(production, payment)
+        sim.QueueEventDelay(self.GID, self.event_SetOrders, .1)
+
+    def event_SetOrders(self):
+        print('Orders!')
+
+
+class HouseholdSector(Agent):
+    def __init__(self, location_id, money_balance, target_money, name='household'):
+        super().__init__(name, money_balance, location_ID=location_id)
+        self.TargetMoney = target_money
+        self.DailyEarnings = 0
+
+    def ReceiveWages(self, amount):
+        """
+        Receive wages, and pay taxes (boo!)
+        Increases DailyEarnings, which is used in the consumption function. Other transactions might not
+        feed into these earnings.
+        :param amount:
+        :return:
+        """
+        sim = simulation.Entity.GetEntity(simulation.SIMULATIONID)
+        self.ReceiveMoney(amount)
+        # Do something more sophisticated for tax payment later.
+        taxes = math.floor(0.1 * amount)
+        self.ChangeReserves(taxes, ReserveType.TAX)
+        sim.PayTaxes(self.GID, taxes)
+        self.DailyEarnings += (amount - taxes)
 
 
 class Market(simulation.Entity):
@@ -418,13 +548,35 @@ class BaseSimulation(simulation.Simulation):
         """
         Set up data, add CentralGovernment
         """
+        self.CentralGovernmentID = None
         super().__init__()
         self.Locations = []
         self.Commodities = []
         self.Markets = {}
+        self.Households = {}
         gov = CentralGovernment()
         self.AddEntity(gov)
         self.CentralGovernmentID = gov.GID
+
+    def AddEntity(self, entity):
+        """
+        When we add an Entity that has a money balance, subtract the amount from the CentralGovernment.
+        This way we ensure that CentralGovernment Money liability matches private sector Money assets
+        without forcing initialisation code to remember to add that operation.
+
+        :param entity: Entity
+        :return:
+        """
+        super().AddEntity(entity)
+        if hasattr(entity, 'Money'):
+            try:
+                gov = simulation.Entity.GetEntity(self.CentralGovernmentID)
+            except KeyError:
+                # This will blow up when we add the CentralGovernment itself!
+                return
+            gov.Money -= entity.Money
+
+
 
     def AddLocation(self, location):
         self.AddEntity(location)
@@ -434,8 +586,30 @@ class BaseSimulation(simulation.Simulation):
         self.AddEntity(commodity)
         self.Commodities.append(commodity.GID)
 
+    def AddHousehold(self, household):
+        """
+        Add a household sector object.
+        :param household: HouseholdSector
+        :return: None
+        """
+        self.AddEntity(household)
+        self.Households[household.LocationID] = household.GID
+
     def GetMarket(self, loc_id, commod_id):
         return self.Markets[(loc_id, commod_id)]
+
+    def GetCommodityByName(self, commodity_name):
+        """
+        Get the commodity_ID via name.
+        Needed by Agents that refer to hard-coded commodities.
+
+        :param commodity_name: str
+        :return: Entity
+        """
+        for c in self.Commodities:
+            c_obj = simulation.Entity.GetEntity(c)
+            if c_obj.Name == commodity_name:
+                return c
 
     def GenerateMarkets(self):
         """
@@ -450,6 +624,22 @@ class BaseSimulation(simulation.Simulation):
                 market = Market(name, loc_id, commod_id)
                 self.AddEntity(market)
                 self.Markets[(loc_id, commod_id)] = market
+
+    def PayTaxes(self, taxpayer_GID, amount):
+        """
+        Have entity pay taxes (if it exists).
+        :param taxpayer_GID: int
+        :param amount: int
+        :return:
+        """
+        try:
+            sucker = simulation.Entity.GetEntity(taxpayer_GID)
+        except KeyError:
+            return
+        sucker.SpendMoney(amount, ReserveType.TAX)
+        cgov = simulation.Entity.GetEntity(self.CentralGovernmentID)
+        cgov.ReceiveMoney(amount)
+
 
 
 

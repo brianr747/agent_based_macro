@@ -28,14 +28,43 @@ client/server version. Although more useful for gaming, someone who wants a real
   client). This means that everything has to be broken up into small events.
   
 - The time axis for a game is somewhat arbitrary. We do not know the exact simulation time any
-event will be processed at. Breaking up events in this way could create accounting identity 
+event will be processed at. Breaking up events in this way might create accounting identity 
   violations (unless we refuse to allow the simulation to advance if there are current events
-  still in the queue).
+  still in the queue). [Update: since we cannot be assured that entities will not be destroyed,
+  by another event, we need to process all legs of a transaction within an event. Unless we 
+  want to introduce players to Herstatt Risk.]
 
 However, there is one advantage, even for "serious" applications: use the client interface to 
 view what is happening in the simulation in real time. The simulation is going to generate a 
 firehose of events and data, and getting them into a format that can be processed using 
 statistical tools will be a challenge. 
+
+**Entities**
+
+Once of the problems with games is that entities can be destroyed during the simulation.
+(This is not normally a feature of academic simulations.) This can create bugs were a command
+from the player attempts to interact with an already-destroyed object.
+
+The fix is to not hold references to objects, rather integer identifiers (GID). We have the
+lookup in a global weakref dictionary. To get the object, use simulation.Entity.GetEntity(GID).
+It will throw a KeyError if the object does not exist, or is marked as dead. Logic needs to take
+this possibility into account. (E.g., a market order might be from a dead entity that was not
+cleaned up, and the order needs to be ignored if this is discovered.) Using numeric ID's
+also helps set up client/server code: on the client, we cannot have access to the server object,
+only a client copy of it. Using ID's helps us keep that straight.
+
+(The lookup is a weakref dictionary, which allows the entity to be garbage collected if no
+other references to the object exist. Normally, the only reference to the object will be in a 
+list saved in the Simulation object.)
+
+The design only allows a single Simulation object to exist, and some data are stored in globals.
+This could be changed to encapsulating everything in the Simulation object, but everything would
+need a reference to the containing simulation. This can create some ugly circular import problems,
+so I am staying away from that option.
+
+Certain entities are assumed to be indestrctible, and I might cheat and embed references 
+to them within objects that would be used within internal Simulation code. This might make
+the code a bit cleaner, and marginally help performance.
 
 **Households and Central Government**
 
@@ -179,8 +208,17 @@ the market.)
 The minimum viable economy:
 - Job guarantee pool + food factories.
 - Households bid on food at a fixed price.
-- Firms offer food at fixed markup.
-- Households/firms cross the market based on "desperation."
+- Government has an open-ended backstop bid for food.
+- Firms offer food at fixed markup. [Update: drop this, move to later stage.]
+- Households/firms cross the bid/asj based on "desperation."
+
+Note: Having thought about it, go for the simplest possible economy: the Monetary Monopoly
+Model. No private production, workers at Job Guarantee produce food, and then the government
+sells the food (and provides an open-end backstop bid).
+
+Government policy determines the price level! Once we have that in place, can work
+on the mechanics of shipping food, and the associated user interface to observe the system.
+Once that is done, add private factories/farms to the mix. 
 
 Next step:
 - Allow ships to fly food from low price to high price worlds.
