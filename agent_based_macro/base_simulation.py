@@ -81,8 +81,8 @@ class BuyOrder(object):
             raise ValueError('Amount must be strictly positive')
         global GLastOrderID
         global GOrderDict
-        self.Price = price
-        self.Amount = amount
+        self.Price = int(price)
+        self.Amount = int(amount)
         self.OrderID = GLastOrderID
         self.FirmGID = firm_gid
         GOrderDict[GLastOrderID] = self
@@ -110,8 +110,13 @@ class OrderQueue(object):
     def __getitem__(self, item):
         return self.Orders[item]
 
+    def __len__(self):
+        return len(self.Orders)
+
     def InsertOrder(self, order):
         bisect.insort_right(self.Orders, order)
+
+
 
 
 class ReserveType(enum.Enum):
@@ -221,6 +226,7 @@ class Agent(simulation.Entity):
         self.ParentID = self.GID
         self.TopParentID = self.GID
         self.Employer = False
+        self.Inventory = Inventory()
 
     def ReceiveMoney(self, amount):
         """
@@ -326,43 +332,29 @@ class Agent(simulation.Entity):
 
         Each Agent registers a number of repeated events that will be added to the queue
         by the Simulation.
-
-        (This might migrate to Entity.)
-
-
-
-        These include:
-        Events that define the "economic rules" for the Agent - no behavioral input.
-        - Wage payment cycle. (pay workers, workers start working.)
-        - The JobGuarantee worker migration step.
-        - Tax payment step
-        - Household sector consumption step.
-
-        Production events - some might be scheduled (just before decision events), others generated
-        dynamically based on when units are produced (?).
-
-        Behavioural Events
-        - Daily planning event (e.g., set target workforce, wages, market orders, etc.)
-        - Liquidity management event before wage/tax payments. (Do we need to raise cash?)
-        - Events set by the "behavioral AI logic": market orders being filled, reaction to production,
-          periodic ticks to look at market pricing to adjust orders, etc.
-
-
-        Possible protocol:
-        ((action1, ... actionN), (first_start, first_end), repeat)
-        actions = list of actions, will be called in order.
-        (first_start, first_end) = range of times for first call. Once we have a lot of entities, spread out
-                                   the events for a class across the range.
-                                   (If we have all the events at the exact same time, time will freeze in realtime
-                                   mode.)
-        repeat = repeat period (typically 1. (daily) or 10. (monthly). Event will be re-inserted with the CallTime
-        incremented by the repeat value.
-
-        (The GID will be filled in by the Simulation.)
-
         :return: tuple
         """
         return ()
+
+    def BuyGoods(self, commodity_ID, amount, payment):
+        """
+        Do the operations for buying a good.
+
+        :param commodity_ID: int
+        :param amount: int
+        :param payment: int
+        :return:
+        """
+        self.SpendMoney(payment, from_reserve=ReserveType.ORDERS)
+        self.Inventory[commodity_ID].AddInventory(amount, payment)
+
+    def SellGoods(self, commodity_ID, amount, payment):
+        self.ReceiveMoney(payment)
+        # Need to expense COGS
+        COGS = self.Inventory[commodity_ID].RemoveInventory(amount, from_reserve=True)
+
+
+
 
 
 class ProducerLabour(Agent):
@@ -505,7 +497,26 @@ class JobGuarantee(Agent):
         sim.QueueEventDelay(self.GID, self.event_SetOrders, .1)
 
     def event_SetOrders(self):
-        print('Orders!')
+        """
+        Set up buy/sell orders.
+
+        Keep it as simple as possible, to allow the loop to close.
+
+        May create a simpler interface for these orders.
+        :return:
+        """
+        sim = simulation.Entity.GetSimulation()
+        food_id = sim.GetCommodityByName('Fud')
+        market = sim.GetMarket(self.LocationID, food_id)
+        production_price = self.JobGuaranteeWage / 15
+        # Create a floor price
+        buyorder = BuyOrder(production_price*.95, 300, self.GID)
+        market.AddBuy(buyorder)
+        # Sell production
+        amount = self.Inventory[food_id].Amount - self.Inventory[food_id].Reserved
+        sellorder = SellOrder(production_price*1.1, amount, self.GID)
+        market.AddSell(sellorder)
+
 
 
 class HouseholdSector(Agent):
@@ -538,6 +549,88 @@ class Market(simulation.Entity):
         self.CommodityID = commodityID
         self.BuyList = OrderQueue()
         self.SellList = OrderQueue()
+
+    def AddBuy(self, buyorder):
+        """
+        Add a buy order.
+
+        Note: if for some reason the new order hits a sell order from the same firm (?),
+        the firm transacts against itself.
+
+        Since the buy will release reserved inventory, it does have the effect of adding to free inventory.
+
+        This should be changed to just releasing inventory, as transacting against itself allows an Agent to
+        play games with inventory costs, and it generates taxable income.
+
+        :param buyorder:
+        :return:
+        """
+        if len(self.SellList) == 0:
+            # No sellers, so automatically add to BuyList
+            self.BuyList.InsertOrder(buyorder)
+            return
+        # If the buy price is less than the ask, we insert into BuyList
+        # Otherwise, we transact until either the buy order is completely filled, or
+        # the ask has risen past the new order's bid
+        while True:
+            ask = self.SellList[0].Price
+            if buyorder.Price < ask:
+                self.BuyList.InsertOrder(buyorder)
+                return
+            else:
+                # Transaction!
+                amount = min(self.SellList[0].Amount, buyorder.Amount)
+                buyer = simulation.Entity.GetEntity(buyorder.FirmGID)
+                seller = simulation.Entity.GetEntity(self.SellList[0].FirmGID)
+                payment = amount * ask
+                #
+                buyer.SpendMoney(payment, from_reserve=ReserveType.ORDERS)
+                seller.ReceiveMoney(payment)
+                buyer.Inventory[self.CommodityID].AddInventory(amount, payment)
+                COGS = seller.Inventory[self.CommodityID].RemoveInventory(amount, from_reserve=True)
+                # TODO: Register loss from COGS
+
+    def AddSell(self, sellorder):
+        """
+        Add a sell order.
+
+        Note: if for some reason the new order hits a sell order from the same firm (?),
+        the firm transacts against itself.
+
+        Since the buy will release reserved inventory, it does have the effect of adding to free inventory.
+
+        This should be changed to just releasing inventory, as transacting against itself allows an Agent to
+        play games with inventory costs, and it generates taxable income.
+
+        :param buyorder:
+        :return:
+        """
+        # Note: I have essentially just mirrored code, which is probably bad, but at least it is
+        # easy to follow.
+        if len(self.BuyList) == 0:
+            # No sellers, so automatically add to BuyList
+            self.SellList.InsertOrder(sellorder)
+            return
+        # If the sell price is greater than the bid, we insert into SellList
+        # Otherwise, we transact until either the order is completely filled, or
+        # the bid drops the new order's ask
+        while True:
+            bid = self.BuyList[0].Price
+            if sellorder.Price > bid:
+                self.BuyList.InsertOrder(sellorder)
+                return
+            else:
+                # Transaction!
+                amount = min(self.BuyList[0].Amount, sellorder.Amount)
+                buyer = simulation.Entity.GetEntity(self.BuyList[0].FirmGID)
+                seller = simulation.Entity.GetEntity(sellorder.GID)
+                payment = amount * bid
+                #
+                buyer.SpendMoney(payment, from_reserve=ReserveType.ORDERS)
+                seller.ReceiveMoney(payment)
+                buyer.Inventory[self.CommodityID].AddInventory(amount, payment)
+                COGS = seller.Inventory[self.CommodityID].RemoveInventory(amount, from_reserve=True)
+                # TODO: Register loss from COGS
 
 
 class BaseSimulation(simulation.Simulation):

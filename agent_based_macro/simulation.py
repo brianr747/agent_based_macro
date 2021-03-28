@@ -198,7 +198,7 @@ class Simulation(Entity):
         # In real time mode, updated at irregular intervals.
         self.Time = 0.
         # The # of seconds in a simulation day
-        self.DayLength = 20.
+        self.DayLength = 8.
         # Base time for time.monotonic(). Only set once TimeStart() command is given
         self.MonotonicBase = None
         # Reset the jitter so that the simulation creation is "deterministic"
@@ -220,7 +220,7 @@ class Simulation(Entity):
     def AddEntity(self, entity):
         self.EntityList.append(entity)
         if hasattr(entity, 'RegisterEvents'):
-            print('bink!')
+            # print('bink!')
             evnt_list = entity.RegisterEvents()
             for (event, first_time) in evnt_list:
                 # first time is a range for the first event; use the jitter_time() function to
