@@ -75,6 +75,13 @@ class Location(simulation.Entity):
             if hasattr(ent, 'LocationID') and ent.LocationID == self.LocationID:
                 self.EntityList.append(ent.GID)
 
+
+class Planet(Location):
+    def __init__(self, name, coords):
+        super().__init__(name)
+        self.Coordinates = coords
+
+
 class BuyOrder(object):
     def __init__(self, price, amount, firm_gid):
         if amount <= 0:
@@ -633,6 +640,45 @@ class Market(simulation.Entity):
                 # TODO: Register loss from COGS
 
 
+class TravellingAgent(Agent):
+    def __init__(self, name, coords, start_ID, travelling_to_ID, speed=2.):
+        super().__init__(name)
+        self.StartCoordinates = coords
+        self.StartLocID = start_ID
+        self.StartTime = 0.
+        self.Speed = speed
+        self.TargetLocID = travelling_to_ID
+        target = simulation.Entity.GetEntity(travelling_to_ID)
+        self.TargetCoordinates = target.Coordinates
+        self.ArrivalTime = 0.
+        if self.StartCoordinates == target.Coordinates:
+            # Already there
+            self.StartLocID = travelling_to_ID
+        else:
+            raise NotImplementedError('No support for spawning ship away from planet')
+
+    def GetLocation(self, ttime):
+        """
+        For now, the server will calculate all locations and update upon request.
+
+        :param ttime: float
+        :return:
+        """
+        if self.StartLocID == self.TargetLocID:
+            return self.StartCoordinates
+        else:
+            if ttime > self.ArrivalTime:
+                # This should not happen, but keep this for a sanity check.
+                # An arrival event should prevent hitting this.
+                return self.TargetCoordinates
+            else:
+                # progess is in [0,1]
+                progress = (ttime - self.StartTime)/(self.ArrivalTime - self.StartTime)
+                # Support N-dimensional spaces
+                out = [s + progress*(t-s) for s,t in zip(self.StartCoordinates, self.TargetCoordinates)]
+                return tuple(out)
+
+
 class BaseSimulation(simulation.Simulation):
     """
     Class to manage the setup of entities.
@@ -650,6 +696,8 @@ class BaseSimulation(simulation.Simulation):
         gov = CentralGovernment()
         self.AddEntity(gov)
         self.CentralGovernmentID = gov.GID
+        # A location that is not really a location -- off the logical grid.
+        self.NonLocationID = None
 
     def AddEntity(self, entity):
         """
