@@ -56,6 +56,7 @@ class Location(simulation.Entity):
         # Duh!
         self.LocationID = self.GID
         self.EntityList = []
+        self.MarketList = []
 
     def Init(self):
         """
@@ -75,12 +76,30 @@ class Location(simulation.Entity):
             if hasattr(ent, 'LocationID') and ent.LocationID == self.LocationID:
                 self.EntityList.append(ent.GID)
 
+    def GenerateMarketList(self):
+        self.MarketList = []
+        for entID in self.EntityList:
+            ent = self.GetEntity(entID)
+            if ent.Type == 'market':
+                self.MarketList.append(entID)
+
+    def GetRepresentation(self):
+        info = super().GetRepresentation()
+        if len(self.MarketList) == 0:
+            self.GenerateMarketList()
+        info['MarketList'] = self.MarketList
+        return info
+
 
 class Planet(Location):
     def __init__(self, name, coords):
         super().__init__(name)
         self.Coordinates = coords
 
+    def GetRepresentation(self):
+        info = super().GetRepresentation()
+        info['Coordinates'] = self.Coordinates
+        return info
 
 class BuyOrder(object):
     def __init__(self, price, amount, firm_gid):
@@ -359,6 +378,9 @@ class Agent(simulation.Entity):
         self.ReceiveMoney(payment)
         # Need to expense COGS
         COGS = self.Inventory[commodity_ID].RemoveInventory(amount, from_reserve=True)
+
+    def GetInfo(self):
+        return f'{self.GID}'
 
 
 
@@ -639,8 +661,23 @@ class Market(simulation.Entity):
                 COGS = seller.Inventory[self.CommodityID].RemoveInventory(amount, from_reserve=True)
                 # TODO: Register loss from COGS
 
+    def GetRepresentation(self):
+        info = super().GetRepresentation()
+        info['Location'] = self.LocationID
+        info['CommodityID'] = self.CommodityID
+        if len(self.BuyList) > 0:
+            info['BidPrice'] = self.BuyList[0].Price
+        else:
+            info['BidPrice'] = None
+        if len(self.SellList) > 0:
+            info['AskPrice'] = self.SellList[0].Price
+        else:
+            info['AskPrice'] = None
+        return info
+
 
 class TravellingAgent(Agent):
+    NoLocationID = None
     def __init__(self, name, coords, start_ID, travelling_to_ID, speed=2.):
         super().__init__(name)
         self.StartCoordinates = coords
@@ -657,7 +694,7 @@ class TravellingAgent(Agent):
         else:
             raise NotImplementedError('No support for spawning ship away from planet')
 
-    def GetLocation(self, ttime):
+    def GetCoordinate(self, ttime):
         """
         For now, the server will calculate all locations and update upon request.
 
@@ -668,8 +705,11 @@ class TravellingAgent(Agent):
             return self.StartCoordinates
         else:
             if ttime > self.ArrivalTime:
-                # This should not happen, but keep this for a sanity check.
-                # An arrival event should prevent hitting this.
+                # TODO: Add an arrival event.
+                # For now, just force the location data to update
+                self.StartLocID = self.TargetLocID
+                self.LocationID = self.TargetLocID
+                self.StartCoordinates = self.TargetCoordinates
                 return self.TargetCoordinates
             else:
                 # progess is in [0,1]
@@ -677,6 +717,45 @@ class TravellingAgent(Agent):
                 # Support N-dimensional spaces
                 out = [s + progress*(t-s) for s,t in zip(self.StartCoordinates, self.TargetCoordinates)]
                 return tuple(out)
+
+    def StartMoving(self, new_Target, ttime):
+        """
+        Move to a new target (always a location, not an arbitrary point.
+        :param new_Target:
+        :param ttime:
+        :return:
+        """
+        coords = self.GetCoordinate(ttime)
+        self.StartLocID = self.LocationID
+        self.StartTime = ttime
+        self.StartCoordinates = coords
+        self.LocationID = TravellingAgent.NoLocationID
+        self.TargetLocID = new_Target
+        target_loc = simulation.Entity.GetEntity(new_Target)
+        self.TargetCoordinates = target_loc.Coordinates
+        # Calculate distance
+        dist = 0.
+        for x1, x2 in zip(self.StartCoordinates, self.TargetCoordinates):
+            dist += pow(x1-x2, 2)
+        dist = math.sqrt(dist)
+        self.ArrivalTime = ttime + dist / self.Speed
+
+    def GetRepresentation(self):
+        info = super().GetRepresentation()
+        if self.StartLocID == self.TargetLocID:
+            # Easy case: not moving.
+            coords = self.StartCoordinates
+            location = self.StartLocID
+        else:
+            sim = simulation.GetSimulation()
+            ttime = sim.Time
+            coords = self.GetCoordinate(ttime)
+            location = self.LocationID
+        info['Coordinates'] = coords
+        info['Location'] = location
+        info['TravellingTo'] = self.TargetLocID
+        return info
+
 
 
 class BaseSimulation(simulation.Simulation):

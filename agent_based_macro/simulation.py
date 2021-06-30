@@ -47,6 +47,16 @@ lastGID = 0
 GEntityDict = weakref.WeakValueDictionary()
 SIMULATIONID = None
 
+GSimulation = None
+
+def GetSimulation():
+    """
+    We only allow a single Simulation object to exist.
+    :return:
+    """
+    global GSimulation
+    return GSimulation
+
 class SimulationError(ValueError):
     """ Base class for all Simulation-thrown Exceptions"""
     pass
@@ -59,6 +69,16 @@ class Entity(object):
         self.Type = ttype
         # Set this to true when killing it.
         self.IsDead = False
+
+    def GetRepresentation(self):
+        """
+        Override to give entity specific string serialisation information.
+
+        :return: dict
+        """
+        return {'GID': self.GID,
+                'Name': self.Name,
+                'Type': self.Type}
 
     @staticmethod
     def GetEntity(GID):
@@ -144,6 +164,8 @@ class Event(object):
         # args = self.args
         return self.Action(*self.args)
 
+
+
 def QueueEvent(event):
     """
     Insert an Event object into the (global) event queue.
@@ -215,6 +237,9 @@ class Simulation(Entity):
         Simulation.EventList = []
         # Add ourselves to the list
         self.AddEntity(self)
+        # Set the global GSimulation reference to point to this simulation
+        global GSimulation
+        GSimulation = self
 
 
     def AddEntity(self, entity):

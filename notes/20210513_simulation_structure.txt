@@ -1,0 +1,37 @@
+Simulation Structure Notes - 2021-05-13
+
+(This is a short status document that I will post on my Patreon.)
+
+I am currently working on one of the more tedious parts of the work - getting the simulation hooked up to
+the graphical user interface. One of the issues is figuring out where in the object structure the code should go.
+
+Since I wanted to make the framework flexible, I am avoiding sticking everything in one class. For the simulation class,
+there are actually 3 classes that are in the working code.
+
+Simulation: Base class that is supposed to handle the input-output for any simulation. No actual modelling support.
+
+BaseSimulation (name is terrible, and may change): A subclass that is designed to support a group of Agent classes.
+This is where most of the agent-based logic lives.
+
+SpaceSimulation (in the SpaceTrader project): this is the actual class that gets built in the SpaceTrader game.
+
+To make things more confusing, I have a client-server architecture split within the code, even though there is no
+actual client-server code. Since I want the framework to support both single-process mode and client-server, I need
+to have the server-client split from the beginning. However, since the split is artificial, how the "client" and
+"server" communicate is somewhat arbitrary. My initial work took the attitude of getting things working as quickly
+possible, but I am now adding a more systematic messaging protocol.
+
+At the time of writing, I had not had much time to work on this due to a consulting project coming due.
+It is now largely out of the way, and can return to a more steady pace. (I expect that work will be sporadic,
+but my plan is to try to keep to a minimal amount over a month.)
+
+What I hope to see coming soon is the following functionality.
+
+(1) The screen shows two planets (suspiciously resembling circles).
+(2) A ship that can be commanded to fly between the planets. (A sprite that might get designed by bored offspring.)
+(3) When at a planet, the price of goods in the market are shown. It will be possible to buy/sell.
+
+As a game, extremely primitive. But the ship is a "roving observer" that shows the status of the simulation, and
+can interact with it. Rather than be boring and look at dumps of data, my plan is to debug my agent-based simulation
+by acting as a human-controlled agent. Probably not how an academic at an Ivy League university would build
+an agent-based model, but luckily, I'm not one of those.
