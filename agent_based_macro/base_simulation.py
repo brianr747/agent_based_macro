@@ -95,6 +95,7 @@ class Planet(Location):
     def __init__(self, name, coords):
         super().__init__(name)
         self.Coordinates = coords
+        self.ProductivityDict = {}
 
     def GetRepresentation(self):
         info = super().GetRepresentation()
@@ -141,6 +142,16 @@ class OrderQueue(object):
 
     def InsertOrder(self, order):
         bisect.insort_right(self.Orders, order)
+
+    def RemoveOrder(self, order_ID):
+        found = None
+        for order in self.Orders:
+            if order.OrderID == order_ID:
+                found = order
+                break
+        if found is not None:
+            self.Orders.remove(order)
+
 
 
 
@@ -253,6 +264,7 @@ class Agent(simulation.Entity):
         self.TopParentID = self.GID
         self.Employer = False
         self.Inventory = Inventory()
+        self.NamedOrders = {}
 
     def ReceiveMoney(self, amount):
         """
@@ -521,7 +533,8 @@ class JobGuarantee(Agent):
         HH.ReceiveWages(payment)
         # JG Production
         food_id = sim.GetCommodityByName('Fud')
-        production = self.WorkersActual * 15
+        loc = simulation.Entity.GetEntity(self.LocationID)
+        production = self.WorkersActual * loc.ProductivityDict[food_id]
         self.Inventory[food_id].AddInventory(production, payment)
         sim.QueueEventDelay(self.GID, self.event_SetOrders, .1)
 
@@ -536,15 +549,16 @@ class JobGuarantee(Agent):
         """
         sim = simulation.Entity.GetSimulation()
         food_id = sim.GetCommodityByName('Fud')
+        location = simulation.Entity.GetEntity(self.LocationID)
         market = sim.GetMarket(self.LocationID, food_id)
-        production_price = self.JobGuaranteeWage / 15
+        production_price = self.JobGuaranteeWage / location.ProductivityDict[food_id]
         # Create a floor price
         buyorder = BuyOrder(production_price*.95, 300, self.GID)
-        market.AddBuy(buyorder)
+        market.AddNamedBuy(agent=self, name='floor', order=buyorder)
         # Sell production
         amount = self.Inventory[food_id].Amount - self.Inventory[food_id].Reserved
         sellorder = SellOrder(production_price*1.1, amount, self.GID)
-        market.AddSell(sellorder)
+        market.AddNamedSell(agent=self, name='production', order=sellorder)
 
 
 
@@ -578,6 +592,37 @@ class Market(simulation.Entity):
         self.CommodityID = commodityID
         self.BuyList = OrderQueue()
         self.SellList = OrderQueue()
+        self.LastPrice = None
+
+    def AddNamedBuy(self, agent, name, order):
+        """
+        Allow agents to keep a "named" order. New orders automatically cancel order with the same name.
+        :param agent: Agent
+        :param name: str
+        :param order: BuyOrder
+        :return:
+        """
+        name = 'buy_' + name
+        ID_existing = agent.NamedOrders.get(name, None)
+        if ID_existing is not None:
+            self.BuyList.RemoveOrder(ID_existing)
+        self.BuyList.InsertOrder(order)
+        agent.NamedOrders[name] = order.OrderID
+
+    def AddNamedSell(self, agent, name, order):
+        """
+        Allow agents to keep a "named" order. New orders automatically cancel order with the same name.
+        :param agent: Agent
+        :param name: str
+        :param order: BuyOrder
+        :return:
+        """
+        name = 'sel_' + name
+        ID_existing = agent.NamedOrders.get(name, None)
+        if ID_existing is not None:
+            self.SellList.RemoveOrder(ID_existing)
+        self.SellList.InsertOrder(order)
+        agent.NamedOrders[name] = order.OrderID
 
     def AddBuy(self, buyorder):
         """
@@ -608,6 +653,7 @@ class Market(simulation.Entity):
                 return
             else:
                 # Transaction!
+                self.LastPrice = ask
                 amount = min(self.SellList[0].Amount, buyorder.Amount)
                 buyer = simulation.Entity.GetEntity(buyorder.FirmGID)
                 seller = simulation.Entity.GetEntity(self.SellList[0].FirmGID)
@@ -646,10 +692,11 @@ class Market(simulation.Entity):
         while True:
             bid = self.BuyList[0].Price
             if sellorder.Price > bid:
-                self.BuyList.InsertOrder(sellorder)
+                self.SellList.InsertOrder(sellorder)
                 return
             else:
                 # Transaction!
+                self.LastPrice = bid
                 amount = min(self.BuyList[0].Amount, sellorder.Amount)
                 buyer = simulation.Entity.GetEntity(self.BuyList[0].FirmGID)
                 seller = simulation.Entity.GetEntity(sellorder.GID)
@@ -673,6 +720,7 @@ class Market(simulation.Entity):
             info['AskPrice'] = self.SellList[0].Price
         else:
             info['AskPrice'] = None
+        info['LastPrice'] = self.LastPrice
         return info
 
 
