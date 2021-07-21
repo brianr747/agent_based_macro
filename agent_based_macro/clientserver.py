@@ -52,3 +52,4 @@ class MsgTimeQuery(ClientServerMsg):
         # ispaused, ttime = self.args
         client.IsPaused = ispaused
         client.Time = ttime
+        client.LastResponseMonotonic = time.monotonic()

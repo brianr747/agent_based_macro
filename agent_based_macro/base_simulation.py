@@ -102,7 +102,8 @@ class Planet(Location):
         info['Coordinates'] = self.Coordinates
         return info
 
-class BuyOrder(object):
+
+class BaseOrder(object):
     def __init__(self, price, amount, firm_gid):
         if amount <= 0:
             raise ValueError('Amount must be strictly positive')
@@ -122,8 +123,16 @@ class BuyOrder(object):
 
     def __lt__(self, other):
         """Comparison order for insertion into OrderQueue"""
-        return self.Price > other.Price
+        raise NotImplementedError('Should not instantiate a BaseOrder')
 
+
+class BuyOrder(BaseOrder):
+    """
+    Just create a
+    """
+    def __lt__(self, other):
+        """Comparison order for insertion into OrderQueue"""
+        return self.Price > other.Price
 
 class SellOrder(BuyOrder):
     def __lt__(self, other):
@@ -140,10 +149,27 @@ class OrderQueue(object):
     def __len__(self):
         return len(self.Orders)
 
+    def CheckEmpty(self):
+        """
+        If the front order has an Amount of 0, pop it. Since the quantity has been reduced to zero,
+        no accounting issues.
+        :return:
+        """
+        if len(self.Orders) > 0:
+            if self.Orders[0].Amount == 0:
+                self.Orders.pop(0)
+
     def InsertOrder(self, order):
         bisect.insort_right(self.Orders, order)
 
     def RemoveOrder(self, order_ID):
+        """
+
+        Returns the removed order, or None if it does not exist.
+
+        :param order_ID:
+        :return: BaseOrder
+        """
         found = None
         for order in self.Orders:
             if order.OrderID == order_ID:
@@ -151,9 +177,9 @@ class OrderQueue(object):
                 break
         if found is not None:
             self.Orders.remove(order)
-
-
-
+            return order
+        else:
+            return None
 
 
 class ReserveType(enum.Enum):
@@ -265,6 +291,8 @@ class Agent(simulation.Entity):
         self.Employer = False
         self.Inventory = Inventory()
         self.NamedOrders = {}
+        # We allow central government entities to run negative money balances, because MMT
+        self.IsCentralGovernment = False
 
     def ReceiveMoney(self, amount):
         """
@@ -331,7 +359,8 @@ class Agent(simulation.Entity):
         :return:
         """
         if change > 0:
-            if change + self.ReserveMoney > self.Money:
+            # Central government entities ignore money reserves.
+            if (not self.IsCentralGovernment) and (change + self.ReserveMoney > self.Money):
                 raise NoFreeMoneyError(f'Attempting to set reserves beyond money [{self.GID}]')
             # OK, let's do this
             if ReserveType.ORDERS == reserve_type:
@@ -350,12 +379,12 @@ class Agent(simulation.Entity):
                     self.ReserveOrders += change
                 else:
                     raise ReserveError(f'attempt to set negative reserves [{self.GID}]')
-            if ReserveType.WAGES == reserve_type:
+            elif ReserveType.WAGES == reserve_type:
                 if self.ReserveWages >= -change:
                     self.ReserveWages += change
                 else:
                     raise ReserveError(f'attempt to set negative reserves [{self.GID}]')
-            if ReserveType.TAX == reserve_type:
+            elif ReserveType.TAX == reserve_type:
                 if self.ReserveTax >= -change:
                     self.ReserveTax += change
                 else:
@@ -393,9 +422,6 @@ class Agent(simulation.Entity):
 
     def GetInfo(self):
         return f'{self.GID}'
-
-
-
 
 
 class ProducerLabour(Agent):
@@ -484,6 +510,7 @@ class JobGuarantee(Agent):
         self.Employer = True
         self.Inventory = Inventory()
         self.JobGuaranteeWage = job_guarantee_wage
+        self.IsCentralGovernment = True
         # Will find the HouseholdGID later...
         self.HouseholdGID = None
         self.EmployerDict = weakref.WeakValueDictionary()
@@ -584,6 +611,77 @@ class HouseholdSector(Agent):
         sim.PayTaxes(self.GID, taxes)
         self.DailyEarnings += (amount - taxes)
 
+    def RegisterEvents(self):
+        """
+
+        :return: list
+        """
+        payment_event = simulation.Event(self.GID, self.event_CalculateSpending, 0., 1.)
+        return [(payment_event, (0.6, 0.7))]
+
+    def event_CalculateSpending(self):
+        """
+        Every day, put in a market order for available spending budget.
+
+        Since we are using a named order, it replaces the existing order, so so we do not have to
+        worry about stacking up orders.
+
+        :return:
+        """
+        # Hard code parameters for now
+        daily_spend = 0.7 * self.DailyEarnings + 0.01 * self.Money
+        # Increase TargetMoney by the implied daily savings - possibly negative
+        self.TargetMoney += (self.DailyEarnings - daily_spend)
+        # Put in a order for 100% of available spending at a fixed offset below the ask price.
+        # This will cancel any existing order, which will free up cash if the previous day's order
+        # was not filled.
+        sim = simulation.Entity.GetSimulation()
+        food_id = sim.GetCommodityByName('Fud')
+        location = simulation.Entity.GetEntity(self.LocationID)
+        market = sim.GetMarket(self.LocationID, food_id)
+        ask = market.GetAsk()
+        # No ask price, no bid!
+        if ask is not None:
+            bid_price = int(0.95 * ask)
+            # Target amount of spending is is the minimum of
+            # (1) self.Money - self.TargetMoney = equals the free room for spending, which would
+            #     equal daily_spend if the sector spent the "maximum" amount the day before.
+            # (2) 130% of daily spend. If we spent less than the maximum in previous days, allow for
+            #     a bid beyond daily spending.
+            targ_spend = min(self.Money-self.TargetMoney, 1.3*daily_spend)
+            amount = math.floor(targ_spend/bid_price)
+            order = BuyOrder(bid_price,amount, self.GID)
+            market.AddNamedBuy(agent=self, name='DailyBid', order=order)
+        # Then add an event for a market order
+        sim.QueueEventDelay(self.GID, self.event_MarketOrder, .6)
+
+    def event_MarketOrder(self):
+        """
+        If there is any available spending power, hit the ask.
+
+        Only spend a certain percentage of cash earmarked for spending.
+
+        :return:
+        """
+        sim = simulation.Entity.GetSimulation()
+        food_id = sim.GetCommodityByName('Fud')
+        location = simulation.Entity.GetEntity(self.LocationID)
+        market = sim.GetMarket(self.LocationID, food_id)
+        ask = market.GetAsk()
+        if ask is None:
+            # Nothing available, no market order!
+            return
+        available_money = self.Money - (self.TargetMoney + self.ReserveMoney)
+        to_spend = available_money * 0.3
+        # Since there may only be a teeny amount for sale at the ask, put a limit order with price
+        # higher than the ask
+        price = 1.05 * ask
+        amount = math.floor(to_spend/price)
+        if amount < 1:
+            return
+        order = BuyOrder(price, amount, self.GID)
+        market.AddNamedBuy(agent=self, name='"MarketOrder"', order=order)
+
 
 class Market(simulation.Entity):
     def __init__(self, name, locationID, commodityID):
@@ -605,9 +703,16 @@ class Market(simulation.Entity):
         name = 'buy_' + name
         ID_existing = agent.NamedOrders.get(name, None)
         if ID_existing is not None:
-            self.BuyList.RemoveOrder(ID_existing)
-        self.BuyList.InsertOrder(order)
+            self.RemoveBuy(agent, ID_existing)
+        self.AddBuy(order)
         agent.NamedOrders[name] = order.OrderID
+
+    def RemoveBuy(self, agent, orderID):
+        order = self.BuyList.RemoveOrder(orderID)
+        if order is not None:
+            value = order.Price * order.Amount
+            agent.ChangeReserves(-value, ReserveType.ORDERS)
+
 
     def AddNamedSell(self, agent, name, order):
         """
@@ -620,9 +725,14 @@ class Market(simulation.Entity):
         name = 'sel_' + name
         ID_existing = agent.NamedOrders.get(name, None)
         if ID_existing is not None:
-            self.SellList.RemoveOrder(ID_existing)
-        self.SellList.InsertOrder(order)
+            self.RemoveSell(agent, ID_existing)
+        self.AddSell(order)
         agent.NamedOrders[name] = order.OrderID
+
+    def RemoveSell(self, agent, orderID):
+        order = self.SellList.RemoveOrder(orderID)
+        if order is not None:
+            agent.Inventory[self.CommodityID].ChangeReserves(-order.Amount)
 
     def AddBuy(self, buyorder):
         """
@@ -639,14 +749,16 @@ class Market(simulation.Entity):
         :param buyorder:
         :return:
         """
-        if len(self.SellList) == 0:
-            # No sellers, so automatically add to BuyList
-            self.BuyList.InsertOrder(buyorder)
-            return
+        buyer = simulation.Entity.GetEntity(buyorder.FirmGID)
+        buyer.ChangeReserves(buyorder.Amount*buyorder.Price, ReserveType.ORDERS)
         # If the buy price is less than the ask, we insert into BuyList
         # Otherwise, we transact until either the buy order is completely filled, or
         # the ask has risen past the new order's bid
         while True:
+            if len(self.SellList) == 0:
+                # No sellers, so automatically add to BuyList
+                self.BuyList.InsertOrder(buyorder)
+                return
             ask = self.SellList[0].Price
             if buyorder.Price < ask:
                 self.BuyList.InsertOrder(buyorder)
@@ -655,7 +767,6 @@ class Market(simulation.Entity):
                 # Transaction!
                 self.LastPrice = ask
                 amount = min(self.SellList[0].Amount, buyorder.Amount)
-                buyer = simulation.Entity.GetEntity(buyorder.FirmGID)
                 seller = simulation.Entity.GetEntity(self.SellList[0].FirmGID)
                 payment = amount * ask
                 #
@@ -664,6 +775,14 @@ class Market(simulation.Entity):
                 buyer.Inventory[self.CommodityID].AddInventory(amount, payment)
                 COGS = seller.Inventory[self.CommodityID].RemoveInventory(amount, from_reserve=True)
                 # TODO: Register loss from COGS
+                # Then, remove orders as needed.
+                buyorder.Amount -= amount
+                self.SellList[0].Amount -= amount
+                # Remove the front of the sell list if empty.
+                self.SellList.CheckEmpty()
+                if buyorder.Amount == 0:
+                    # Order has been cleared out, quit processing.
+                    return
 
     def AddSell(self, sellorder):
         """
@@ -682,14 +801,17 @@ class Market(simulation.Entity):
         """
         # Note: I have essentially just mirrored code, which is probably bad, but at least it is
         # easy to follow.
-        if len(self.BuyList) == 0:
-            # No sellers, so automatically add to BuyList
-            self.SellList.InsertOrder(sellorder)
-            return
+        seller = simulation.Entity.GetEntity(sellorder.FirmGID)
+        seller.Inventory[self.CommodityID].ChangeReserves(sellorder.Amount)
+
         # If the sell price is greater than the bid, we insert into SellList
         # Otherwise, we transact until either the order is completely filled, or
         # the bid drops the new order's ask
         while True:
+            if len(self.BuyList) == 0:
+                # No sellers, so automatically add to BuyList
+                self.SellList.InsertOrder(sellorder)
+                return
             bid = self.BuyList[0].Price
             if sellorder.Price > bid:
                 self.SellList.InsertOrder(sellorder)
@@ -699,7 +821,7 @@ class Market(simulation.Entity):
                 self.LastPrice = bid
                 amount = min(self.BuyList[0].Amount, sellorder.Amount)
                 buyer = simulation.Entity.GetEntity(self.BuyList[0].FirmGID)
-                seller = simulation.Entity.GetEntity(sellorder.GID)
+
                 payment = amount * bid
                 #
                 buyer.SpendMoney(payment, from_reserve=ReserveType.ORDERS)
@@ -707,6 +829,25 @@ class Market(simulation.Entity):
                 buyer.Inventory[self.CommodityID].AddInventory(amount, payment)
                 COGS = seller.Inventory[self.CommodityID].RemoveInventory(amount, from_reserve=True)
                 # TODO: Register loss from COGS
+                # Clear out empty orders as needed
+                self.BuyList[0].Amount -= amount
+                sellorder.Amount -= amount
+                self.BuyList.CheckEmpty()
+                if sellorder.Amount == 0:
+                    # Order has been completely filled, quit processing
+                    return
+
+    def GetBid(self):
+        if len(self.BuyList) > 0:
+            return self.BuyList[0].Price
+        else:
+            return None
+
+    def GetAsk(self):
+        if len(self.SellList) > 0:
+            return self.SellList[0].Price
+        else:
+            return None
 
     def GetRepresentation(self):
         info = super().GetRepresentation()
@@ -803,7 +944,6 @@ class TravellingAgent(Agent):
         info['Location'] = location
         info['TravellingTo'] = self.TargetLocID
         return info
-
 
 
 class BaseSimulation(simulation.Simulation):

@@ -183,6 +183,10 @@ class Client(object):
         self.ClientID = Client.last_ID
         Client.last_ID += 1
         self.Simulation = simulation
+        self.Time = None
+        self.DayLength = 0.
+        # When did the client last get a time response (as per time.monotonic()). Used to estimate time.
+        self.LastResponseMonotonic = 0.
 
     def SendCommand(self, cmd):
         """
