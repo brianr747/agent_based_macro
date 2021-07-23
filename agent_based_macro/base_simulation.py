@@ -650,10 +650,14 @@ class HouseholdSector(Agent):
             #     a bid beyond daily spending.
             targ_spend = min(self.Money-self.TargetMoney, 1.3*daily_spend)
             amount = math.floor(targ_spend/bid_price)
-            order = BuyOrder(bid_price,amount, self.GID)
-            market.AddNamedBuy(agent=self, name='DailyBid', order=order)
+            if amount > 0:
+                order = BuyOrder(bid_price,amount, self.GID)
+                market.AddNamedBuy(agent=self, name='DailyBid', order=order)
         # Then add an event for a market order
         sim.QueueEventDelay(self.GID, self.event_MarketOrder, .6)
+        # Need to reset daily Earnings. Could be done as a seperate event, but will need a time series
+        # object.
+        self.DailyEarnings = 0
 
     def event_MarketOrder(self):
         """
@@ -691,6 +695,7 @@ class Market(simulation.Entity):
         self.BuyList = OrderQueue()
         self.SellList = OrderQueue()
         self.LastPrice = None
+        self.LastTime = 0.
 
     def AddNamedBuy(self, agent, name, order):
         """
@@ -766,6 +771,7 @@ class Market(simulation.Entity):
             else:
                 # Transaction!
                 self.LastPrice = ask
+                self.LastTime = simulation.GetSimulation().Time
                 amount = min(self.SellList[0].Amount, buyorder.Amount)
                 seller = simulation.Entity.GetEntity(self.SellList[0].FirmGID)
                 payment = amount * ask
@@ -819,6 +825,7 @@ class Market(simulation.Entity):
             else:
                 # Transaction!
                 self.LastPrice = bid
+                self.LastTime = simulation.GetSimulation().Time
                 amount = min(self.BuyList[0].Amount, sellorder.Amount)
                 buyer = simulation.Entity.GetEntity(self.BuyList[0].FirmGID)
 
@@ -862,6 +869,7 @@ class Market(simulation.Entity):
         else:
             info['AskPrice'] = None
         info['LastPrice'] = self.LastPrice
+        info['LastTime'] = self.LastTime
         return info
 
 

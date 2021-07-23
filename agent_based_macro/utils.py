@@ -1,9 +1,13 @@
 
 
 """
-Miscellaneous functions
+Miscellaneous functions and classes
 
 """
+
+
+import math
+
 
 
 GLastJitter = 0
@@ -36,4 +40,30 @@ def jitter_time(time_range):
     if GLastJitter == len(GJitter):
         GLastJitter = 0
     return  time_range[0] + GJitter[GLastJitter]*(time_range[1] - time_range[0])
+
+
+class TimeSeries(object):
+    """
+    A time series class that is hopefully efficient in a world where time updates are somewhat random.
+
+    For now, allow the time series to grow without limit. At some point, may need to cap memory usage.
+
+    Keep the data as a list, and grow as needed.
+
+    Note: assumes the time axis starts at 0., and does no checks against negative time.
+    """
+    ChunkSize = 1024
+
+    def __init__(self, freq=1., fill=None):
+        self.Data = [fill] * TimeSeries.ChunkSize
+        self.Frequency = freq
+        self.FillValue = fill
+
+    def GetIndex(self, t):
+        """
+        Return the index associated with time t.
+        :param t: float
+        :return: int
+        """
+        return math.floor(t / self.Frequency)
 
