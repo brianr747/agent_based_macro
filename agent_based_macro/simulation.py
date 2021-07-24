@@ -49,6 +49,7 @@ SIMULATIONID = None
 
 GSimulation = None
 
+
 def GetSimulation():
     """
     We only allow a single Simulation object to exist.
@@ -57,18 +58,21 @@ def GetSimulation():
     global GSimulation
     return GSimulation
 
+
 class SimulationError(ValueError):
     """ Base class for all Simulation-thrown Exceptions"""
     pass
 
 
 class Entity(object):
-    def __init__(self, name='', ttype = ''):
+    def __init__(self, name='', ttype=''):
         self.GID = AddEntity(self)
         self.Name = name
         self.Type = ttype
         # Set this to true when killing it.
         self.IsDead = False
+        self.ActionQueue = []
+        self.ActionData = {}
 
     def GetRepresentation(self):
         """
@@ -144,6 +148,7 @@ class Event(object):
 
     Once popped, the entity with GID will have its method event_{Action}(args) called.
     """
+
     def __init__(self, gid, action, calltime, repeat, *args):
         self.GID = gid
         self.Action = action
@@ -165,7 +170,6 @@ class Event(object):
         return self.Action(*self.args)
 
 
-
 def QueueEvent(event):
     """
     Insert an Event object into the (global) event queue.
@@ -177,8 +181,19 @@ def QueueEvent(event):
     """
     insort_right(Simulation.EventList, event)
 
+
+class ActionEvent(Event):
+    """
+    An ActionEvent is a special type of Event that is treated specially.
+
+    
+    """
+    pass
+
+
 class Client(object):
     last_ID = 0
+
     def __init__(self, simulation=None):
         self.ClientID = Client.last_ID
         Client.last_ID += 1
@@ -245,7 +260,6 @@ class Simulation(Entity):
         global GSimulation
         GSimulation = self
 
-
     def AddEntity(self, entity):
         self.EntityList.append(entity)
         if hasattr(entity, 'RegisterEvents'):
@@ -276,7 +290,6 @@ class Simulation(Entity):
         """
         event = Event(GID, action, self.Time + delay, None, *args)
         QueueEvent(event)
-
 
     def GetEntity(self, GID):
         """
@@ -314,7 +327,6 @@ class Simulation(Entity):
                     event.CallTime = event.CallTime + event.Repeat
                     QueueEvent(event)
 
-
                 return True
         # Return False if nothing happened.
         return False
@@ -330,6 +342,8 @@ class Simulation(Entity):
         """
         To be called by an external process that makes sures the calls are slightly staggered, so that we are not
         calling time.monotonic() for every single event.
+
+        Note: must increment the static time member for the TimeSeries class to keep in sync
         :return:
         """
         if self.TimeMode == 'realtime':
@@ -356,7 +370,8 @@ class Simulation(Entity):
                 oldbase = self.MonotonicBase
                 self.MonotonicBase = time.monotonic()
                 self.Time += (self.MonotonicBase - oldbase) / self.DayLength
-
+            # Keep the TimeSeries time sync'd to this time.
+            utils.TimeSeries.Time = self.Time
         else:
             raise ValueError('Cannot call IncrementTime() in "sim" mode')
 
@@ -370,12 +385,3 @@ class Simulation(Entity):
             msg.ClientMessage(self.ClientDict[clientID])
         else:
             msg.ClientMessage(self.ClientDict[clientID], *msg.args)
-
-
-
-
-
-
-
-
-

@@ -58,3 +58,91 @@ class TestTimeSeries(TestCase):
         # Should initialise with two entries
         self.assertEqual(obj.Data, [None]*utils.TimeSeries.ChunkSize)
 
+    def test_set_1(self):
+        utils.TimeSeries.ChunkSize = 4
+        obj = utils.TimeSeries()
+        utils.TimeSeries.Time = 0.
+        obj.Set(1.)
+        self.assertEqual(obj.Data, [1., None, None, None])
+        obj.Set(2., time=1.)
+        self.assertEqual(obj.Data, [1., 2., None, None])
+        utils.TimeSeries.ChunkSize = 1024
+
+    def test_set_grow(self):
+        utils.TimeSeries.ChunkSize = 4
+        obj = utils.TimeSeries()
+        utils.TimeSeries.Time = 4.
+        # Should add one chunk
+        obj.Set(1.)
+        self.assertEqual(obj.Data, [None, None, None, None, 1., None, None, None])
+        obj.Set(2., time=6.)
+        self.assertEqual(obj.Data, [None, None, None, None, 1., None, 2., None])
+        utils.TimeSeries.ChunkSize = 1024
+
+    def test_big_grow(self):
+        utils.TimeSeries.ChunkSize = 3
+        obj = utils.TimeSeries()
+        utils.TimeSeries.Time = 6.
+        # Should add two chunks
+        obj.Set(1.)
+        self.assertEqual(obj.Data, [None, None, None, None, None, None, 1., None, None])
+        utils.TimeSeries.ChunkSize = 1024
+
+    def test_add(self):
+        obj = utils.TimeSeries(fill=None, freq=1.)
+        self.assertEqual(obj.Data[0], None)
+        # Time 0., .1, .2 all map to first entry
+        obj.Add(1., time=0.1)
+        self.assertEqual(obj.Data[0], 1.)
+        obj.Add(2., time = .2)
+        self.assertEqual(3., obj.Data[0])
+
+    def test_iadd(self):
+        obj = utils.TimeSeries(fill=None, freq=1.)
+        utils.TimeSeries.Time = 0.
+        self.assertEqual(obj.Data[0], None)
+        # Time 0., .1, .2 all map to first entry
+        obj += 1.
+        self.assertEqual(obj.Data[0], 1.)
+        utils.TimeSeries.Time = .2
+        obj += 2
+        self.assertEqual(3., obj.Data[0])
+
+    def test_isub(self):
+        obj = utils.TimeSeries(fill=None, freq=1.)
+        utils.TimeSeries.Time = 0.
+        self.assertEqual(obj.Data[0], None)
+        # Time 0., .1, .2 all map to first entry
+        obj -= 1.
+        self.assertEqual(obj.Data[0], -1.)
+        utils.TimeSeries.Time = .2
+        obj -= 2.
+        self.assertEqual(-3., obj.Data[0])
+
+    def test_get_1(self):
+        obj = utils.TimeSeries(fill=None, freq=1.)
+        utils.TimeSeries.Time = 0.
+        obj.Set(1., time=0.)
+        self.assertEqual(1., obj.Get(time=0.1))
+        self.assertEqual(1., obj.Get())
+        self.assertIsNone(obj.Get(time=1.))
+        # Check that handles Get() beyond the size of Data
+        chunk = utils.TimeSeries.ChunkSize
+        self.assertEqual(chunk, len(obj.Data))
+        # Should return None if we go past end
+        self.assertIsNone(obj.Get(float(chunk +2)))
+        # Should not grow
+        self.assertEqual(chunk, len(obj.Data))
+
+
+    def test_negative_time(self):
+        obj = utils.TimeSeries()
+        # obj.Get(-1.)
+        self.assertRaises(ValueError, obj.Get, -.1)
+
+
+
+
+
+
+

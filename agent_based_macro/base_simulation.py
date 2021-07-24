@@ -23,18 +23,13 @@ Within this base class, all transactions occur within the same location. Need ex
 between locations.
 
 """
-import bisect
 import weakref
 import enum
 import math
 
+from agent_based_macro.orders import OrderQueue, SellOrder, BuyOrder
 from agent_based_macro.simulation import SimulationError
 import agent_based_macro.simulation as simulation
-
-# Order ID: all negative, so we don't re-use Entity IDs.
-GLastOrderID = -1
-# Another lookup
-GOrderDict = weakref.WeakValueDictionary()
 
 
 class NoMoneyError(SimulationError):
@@ -101,85 +96,6 @@ class Planet(Location):
         info = super().GetRepresentation()
         info['Coordinates'] = self.Coordinates
         return info
-
-
-class BaseOrder(object):
-    def __init__(self, price, amount, firm_gid):
-        if amount <= 0:
-            raise ValueError('Amount must be strictly positive')
-        global GLastOrderID
-        global GOrderDict
-        self.Price = int(price)
-        self.Amount = int(amount)
-        self.OrderID = GLastOrderID
-        self.FirmGID = firm_gid
-        GOrderDict[GLastOrderID] = self
-        GLastOrderID -= 1
-
-    @staticmethod
-    def GetOrder(orderID):
-        global GOrderDict
-        return GOrderDict[orderID]
-
-    def __lt__(self, other):
-        """Comparison order for insertion into OrderQueue"""
-        raise NotImplementedError('Should not instantiate a BaseOrder')
-
-
-class BuyOrder(BaseOrder):
-    """
-    Just create a
-    """
-    def __lt__(self, other):
-        """Comparison order for insertion into OrderQueue"""
-        return self.Price > other.Price
-
-class SellOrder(BuyOrder):
-    def __lt__(self, other):
-        return self.Price < other.Price
-
-
-class OrderQueue(object):
-    def __init__(self):
-        self.Orders = []
-
-    def __getitem__(self, item):
-        return self.Orders[item]
-
-    def __len__(self):
-        return len(self.Orders)
-
-    def CheckEmpty(self):
-        """
-        If the front order has an Amount of 0, pop it. Since the quantity has been reduced to zero,
-        no accounting issues.
-        :return:
-        """
-        if len(self.Orders) > 0:
-            if self.Orders[0].Amount == 0:
-                self.Orders.pop(0)
-
-    def InsertOrder(self, order):
-        bisect.insort_right(self.Orders, order)
-
-    def RemoveOrder(self, order_ID):
-        """
-
-        Returns the removed order, or None if it does not exist.
-
-        :param order_ID:
-        :return: BaseOrder
-        """
-        found = None
-        for order in self.Orders:
-            if order.OrderID == order_ID:
-                found = order
-                break
-        if found is not None:
-            self.Orders.remove(order)
-            return order
-        else:
-            return None
 
 
 class ReserveType(enum.Enum):
@@ -580,11 +496,11 @@ class JobGuarantee(Agent):
         market = sim.GetMarket(self.LocationID, food_id)
         production_price = self.JobGuaranteeWage / location.ProductivityDict[food_id]
         # Create a floor price
-        buyorder = BuyOrder(production_price*.95, 300, self.GID)
+        buyorder = BuyOrder(production_price * .95, 300, self.GID)
         market.AddNamedBuy(agent=self, name='floor', order=buyorder)
         # Sell production
         amount = self.Inventory[food_id].Amount - self.Inventory[food_id].Reserved
-        sellorder = SellOrder(production_price*1.1, amount, self.GID)
+        sellorder = SellOrder(production_price * 1.1, amount, self.GID)
         market.AddNamedSell(agent=self, name='production', order=sellorder)
 
 
@@ -651,7 +567,7 @@ class HouseholdSector(Agent):
             targ_spend = min(self.Money-self.TargetMoney, 1.3*daily_spend)
             amount = math.floor(targ_spend/bid_price)
             if amount > 0:
-                order = BuyOrder(bid_price,amount, self.GID)
+                order = BuyOrder(bid_price, amount, self.GID)
                 market.AddNamedBuy(agent=self, name='DailyBid', order=order)
         # Then add an event for a market order
         sim.QueueEventDelay(self.GID, self.event_MarketOrder, .6)
@@ -991,8 +907,6 @@ class BaseSimulation(simulation.Simulation):
                 # This will blow up when we add the CentralGovernment itself!
                 return
             gov.Money -= entity.Money
-
-
 
     def AddLocation(self, location):
         self.AddEntity(location)
