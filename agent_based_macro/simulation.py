@@ -50,6 +50,14 @@ SIMULATIONID = None
 GSimulation = None
 
 
+class EntityDoesNotExist(KeyError):
+    pass
+
+
+class EntityDead(KeyError):
+    pass
+
+
 def GetSimulation():
     """
     We only allow a single Simulation object to exist.
@@ -100,9 +108,12 @@ class Entity(object):
         :return: Entity
         """
         global GEntityDict
-        out = GEntityDict[GID]
+        try:
+            out = GEntityDict[GID]
+        except KeyError:
+            raise EntityDoesNotExist(f'Entity with GID={GID} does not exist')
         if out.IsDead:
-            raise KeyError(f'Entity [{GID}] is marked as dead')
+            raise EntityDead(f'Entity with GID={GID} is marked as dead')
         return out
 
     @staticmethod
@@ -146,12 +157,12 @@ class Event(object):
 
     Queued based on calltime, and will be popped from queue once that time is hit.
 
-    Once popped, the entity with GID will have its method event_{Action}(args) called.
+    Once popped, the entity with GID will have its method event_{Callback}(args) called.
     """
 
-    def __init__(self, gid, action, calltime, repeat, *args):
+    def __init__(self, gid, callback, calltime, repeat, *args):
         self.GID = gid
-        self.Action = action
+        self.Callback = callback
         self.CallTime = calltime
         # If None, does not repeat. Otherwise, framework will reinsert with the CallTime incremented by Repeat.
         # I.e., if repeat = 1, repeat daily.
@@ -162,12 +173,12 @@ class Event(object):
         return self.CallTime < other.CallTime
 
     def __call__(self):
-        # This might throw a KeyError, if the entity is gone. Calling Simulation will eat this.
+        # This might throw an error, if the entity is gone. Calling Simulation will eat this.
         # It needs to know so that the Event is not put back in the queue if it's a repeater...
         entity = Entity.GetEntity(self.GID)
         # meth = getattr(entity, f'event_{self.Action}')
         # args = self.args
-        return self.Action(*self.args)
+        return self.Callback(*self.args)
 
 
 def QueueEvent(event):
@@ -184,11 +195,50 @@ def QueueEvent(event):
 
 class ActionEvent(Event):
     """
-    An ActionEvent is a special type of Event that is treated specially.
+    An ActionEvent is a type of Event that is treated specially.
 
-    
+    (1) A list of requested data is specified in the ActionEvent. The simulation will
+    fetch the requested data.
+    (2) The action
+
     """
-    pass
+    def __init__(self, gid, callback, calltime, repeat, *args):
+        super().__init__(gid, callback, calltime, repeat, args)
+        self.DataRequests = []
+
+    def AddDataRequest(self, name, *args):
+        """
+        Add a data request that will have data stored under "name"
+        :param name: str
+        :param args:
+        :return:
+        """
+        self.DataRequests.append((name, args))
+
+
+class Action(object):
+    """
+    Actions that are requested by Entities during the processing loop.
+    """
+    def __init__(self, *args):
+        self.args = args
+
+
+class ActionDataRequest(Action):
+    """
+    Request data for the Entity (for later Actions
+    """
+    def __init__(self, name, *args):
+        super().__init__(*args)
+        self.Name = name
+
+class ActionCallback(Action):
+    """
+    Request calling another callback (for multi-stage actions).
+    """
+    def __init__(self, callback, *args):
+        super().__init__(*args)
+        self.Callback = callback
 
 
 class Client(object):
@@ -259,6 +309,8 @@ class Simulation(Entity):
         # Set the global GSimulation reference to point to this simulation
         global GSimulation
         GSimulation = self
+        # How many Actions can be processed?
+        self.MaxActionLimit = 100
 
     def AddEntity(self, entity):
         self.EntityList.append(entity)
@@ -316,11 +368,18 @@ class Simulation(Entity):
             if self.Time >= self.EventList[0].CallTime:
                 event = self.EventList.pop(0)
                 try:
-                    event()
-                except KeyError:
-                    # The Entity was dead or disappeared. Do nothing (so is no longer REPEATed).
+                    if isinstance(event, ActionEvent):
+                        self.ProcessActionEvent(event)
+                    else:
+                        event()
+                except EntityDoesNotExist:
+                    # The Entity disappeared. Do nothing (so is no longer REPEATed).
                     # Return True, since we did have an Event in the queue.
                     return True
+                except EntityDead:
+                    # Not entirely sure whether we should allow dead entities.
+                    # Only reason I see is to hold information to display to clients.
+                    raise NotImplementedError('Dead entity handling not implemented')
                 if event.Repeat is not None:
                     if event.Repeat < 0.01:
                         raise ValueError('Cannot have so close a repeat value!')
@@ -330,6 +389,71 @@ class Simulation(Entity):
                 return True
         # Return False if nothing happened.
         return False
+
+    def ProcessActionEvent(self, actionEvent):
+        """
+        Special processing for an ActionEvent.
+
+        ActionEvents are handled differently that regular events.
+
+        (1) The ActionEvent specifies data to be gathered before calling the callback
+        (2) The callback is called.
+        (3) During the callback, the entity uses the gathered data, and fills in a queue of Actions
+            (e.g,, transactions) that are to be undertaken.
+        (4) The list of actions is then processed, with the processing handled by simulation subclasses.
+        (5) The Entity can do multi-stage actions by adding ActionDataRequests (that add/overwrite data)
+            and new ActionCallbacks. Those callbacks are then called. This can repeat up until
+            self.MAxActionLimit Actions are performed (at which point, the assumption is that there is an error).
+
+        :param actionEvent: ActionEvent
+        :return:
+        """
+        # This can throw an error if the entity no longer exists, but it needs to be caught by Process() method.
+        ent: Entity = self.GetEntity(actionEvent.GID)
+        # Clear the action data members
+        # Data that is requested before the callback
+        ent.ActionData = {}
+        # Actions requested by the Entity
+        ent.ActionQueue = []
+        for name, data_args in actionEvent.DataRequests:
+            ent.ActionData[name] = self.GetActionData(data_args)
+        # Run the callback
+        actionEvent.Callback(actionEvent.args)
+        # Then, do the requested actions.
+        cnt = 0
+        while len(ent.ActionQueue) > 0:
+            cnt += 1
+            if cnt == self.MaxActionLimit:
+                # Enforce a limit in case an infinite recursion is hit
+                raise ValueError(f'Entity spawned more than {self.MaxActionLimit} Actions!')
+            action = ent.ActionQueue.pop(0)
+            if isinstance(action, ActionDataRequest):
+                ent.ActionData[action.Name] = self.GetActionData(action.args)
+            elif isinstance(action, ActionCallback):
+                action.Callback(action.args)
+            else:
+                self.ProcessAction(action)
+
+
+    def ProcessAction(self, action):
+        """
+        Subclass simulations need to deal with simulation-specific actions.
+
+        :param action: Action
+        :return:
+        """
+        pass
+
+    def GetActionData(self, *args):
+        """
+        Function that needs to be overriden by subclasses to do data fetching. Each simulation will
+        have to work out its own protocol.
+
+        :param args:
+        :return:
+        """
+        return None
+
 
     def ProcessCommand(self):
         obj = self.ClientCommands.pop(0)

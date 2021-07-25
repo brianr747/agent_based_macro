@@ -458,7 +458,7 @@ class JobGuarantee(Agent):
 
         :return: list
         """
-        payment_event = simulation.Event(self.GID, self.event_Payment, 0., 1.)
+        payment_event = simulation.ActionEvent(self.GID, self.event_Payment, 0., 1.)
         return [(payment_event, (0., 0.1))]
 
     def event_Payment(self):
@@ -954,6 +954,7 @@ class BaseSimulation(simulation.Simulation):
                 market = Market(name, loc_id, commod_id)
                 self.AddEntity(market)
                 self.Markets[(loc_id, commod_id)] = market
+                self.Markets[(loc_id, com.Name)] = market
 
     def PayTaxes(self, taxpayer_GID, amount):
         """
