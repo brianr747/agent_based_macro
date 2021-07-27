@@ -36,7 +36,7 @@ class TestInventory(TestCase):
 
     def test_COGS_1(self):
         info = base_simulation.InventoryInfo(1)
-        info.AddInventory(100, 201)
+        info.add_inventory(100, 201)
         self.assertEqual(info.Amount, 100)
         COGS = info.RemoveInventory(30)
         self.assertEqual(COGS, 60)

@@ -37,25 +37,16 @@ Simulation event objects and placed into the Simulation Event queue.
 """
 
 from bisect import insort_right
-import weakref
 import time
 import math
+from abc import ABC, abstractmethod
 
+import agent_based_macro.entity
 import agent_based_macro.utils as utils
-
-lastGID = 0
-GEntityDict = weakref.WeakValueDictionary()
-SIMULATIONID = None
+from agent_based_macro.entity import EntityDoesNotExist, EntityDead, Entity, reset_entities, ActionDataRequest, \
+    ActionCallback
 
 GSimulation = None
-
-
-class EntityDoesNotExist(KeyError):
-    pass
-
-
-class EntityDead(KeyError):
-    pass
 
 
 def GetSimulation():
@@ -70,85 +61,6 @@ def GetSimulation():
 class SimulationError(ValueError):
     """ Base class for all Simulation-thrown Exceptions"""
     pass
-
-
-class Entity(object):
-    def __init__(self, name='', ttype=''):
-        self.GID = AddEntity(self)
-        self.Name = name
-        self.Type = ttype
-        # Set this to true when killing it.
-        self.IsDead = False
-        self.ActionQueue = []
-        self.ActionData = {}
-
-    def GetRepresentation(self):
-        """
-        Override to give entity specific string serialisation information.
-
-        :return: dict
-        """
-        return {'GID': self.GID,
-                'Name': self.Name,
-                'Type': self.Type}
-
-    @staticmethod
-    def GetEntity(GID):
-        """
-        Call this to get another entity.
-
-        (Use this to wrap calls to look up GID's instead of directly accessing the global dict, in case it moves.)
-
-        Throws a KeyError if the GID is not mapped, or marked as dead.
-
-        Normally, dead entities should not be in the weakref dictionary, but the documentation says it is possible,
-        so I am adding the validation.
-
-        :param GID:
-        :return: Entity
-        """
-        global GEntityDict
-        try:
-            out = GEntityDict[GID]
-        except KeyError:
-            raise EntityDoesNotExist(f'Entity with GID={GID} does not exist')
-        if out.IsDead:
-            raise EntityDead(f'Entity with GID={GID} is marked as dead')
-        return out
-
-    @staticmethod
-    def GetSimulation():
-        """
-        Get the Simulation object.
-
-        (Should not be called on "client-side" code, but is needed within the Simulation itself.)
-
-        :return: Simulation
-        """
-        global SIMULATIONID
-        return Entity.GetEntity(SIMULATIONID)
-
-
-def AddEntity(entity):
-    global lastGID
-    global GEntityDict
-    gid = lastGID
-    GEntityDict[gid] = entity
-    lastGID += 1
-    return gid
-
-
-def ResetEntities():
-    """
-    Called by Simulation initialisation
-    :return:
-    """
-    global lastGID
-    global GEntityDict
-    global SIMULATIONID
-    SIMULATIONID = None
-    lastGID = 0
-    GEntityDict = weakref.WeakValueDictionary()
 
 
 class Event(object):
@@ -175,7 +87,7 @@ class Event(object):
     def __call__(self):
         # This might throw an error, if the entity is gone. Calling Simulation will eat this.
         # It needs to know so that the Event is not put back in the queue if it's a repeater...
-        entity = Entity.GetEntity(self.GID)
+        entity = Entity.get_entity(self.GID)
         # meth = getattr(entity, f'event_{self.Action}')
         # args = self.args
         return self.Callback(*self.args)
@@ -216,31 +128,6 @@ class ActionEvent(Event):
         self.DataRequests.append((name, args))
 
 
-class Action(object):
-    """
-    Actions that are requested by Entities during the processing loop.
-    """
-    def __init__(self, *args):
-        self.args = args
-
-
-class ActionDataRequest(Action):
-    """
-    Request data for the Entity (for later Actions
-    """
-    def __init__(self, name, *args):
-        super().__init__(*args)
-        self.Name = name
-
-class ActionCallback(Action):
-    """
-    Request calling another callback (for multi-stage actions).
-    """
-    def __init__(self, callback, *args):
-        super().__init__(*args)
-        self.Callback = callback
-
-
 class Client(object):
     last_ID = 0
 
@@ -262,9 +149,11 @@ class Client(object):
         self.Simulation.ClientCommands.append(cmd)
 
 
-class Simulation(Entity):
+class Simulation(ABC, Entity):
     """
     Simulation object, to be run by server (or main loop)
+
+    This is an abstract base class. Subclasses must override the @abstractmethod
 
     Base class handles low level processing, and control of time. The entities within the simulation do all the work...
     """
@@ -278,10 +167,9 @@ class Simulation(Entity):
 
     def __init__(self):
         # TimeMode can either be 'sim' or 'realtime'
-        ResetEntities()
+        reset_entities()
         super().__init__('simulation', 'simulation')
-        global SIMULATIONID
-        SIMULATIONID = self.GID
+        agent_based_macro.entity.SIMULATION_ID = self.GID
         self.TimeMode = 'sim'
         # Is the simulation paused (only matters for 'realtime' mode
         self.IsPaused = True
@@ -343,14 +231,13 @@ class Simulation(Entity):
         event = Event(GID, action, self.Time + delay, None, *args)
         QueueEvent(event)
 
-    def GetEntity(self, GID):
+    def get_entity(self, GID):
         """
         Convenience function for callbacks that have the handle to the simulation
         :param GID:
         :return:
         """
-        global GEntityDict
-        return GEntityDict[GID]
+        return agent_based_macro.entity.GEntityDict[GID]
 
     def Process(self):
         """
@@ -409,14 +296,14 @@ class Simulation(Entity):
         :return:
         """
         # This can throw an error if the entity no longer exists, but it needs to be caught by Process() method.
-        ent: Entity = self.GetEntity(actionEvent.GID)
+        ent: Entity = self.get_entity(actionEvent.GID)
         # Clear the action data members
         # Data that is requested before the callback
         ent.ActionData = {}
         # Actions requested by the Entity
         ent.ActionQueue = []
         for name, data_args in actionEvent.DataRequests:
-            ent.ActionData[name] = self.GetActionData(data_args)
+            ent.ActionData[name] = self.GetActionData(ent, data_args)
         # Run the callback
         actionEvent.Callback(actionEvent.args)
         # Then, do the requested actions.
@@ -428,14 +315,14 @@ class Simulation(Entity):
                 raise ValueError(f'Entity spawned more than {self.MaxActionLimit} Actions!')
             action = ent.ActionQueue.pop(0)
             if isinstance(action, ActionDataRequest):
-                ent.ActionData[action.Name] = self.GetActionData(action.args)
+                ent.ActionData[action.Name] = self.GetActionData(ent, action.args)
             elif isinstance(action, ActionCallback):
                 action.Callback(action.args)
             else:
-                self.ProcessAction(action)
+                self.ProcessAction(ent, action)
 
-
-    def ProcessAction(self, action):
+    @abstractmethod
+    def ProcessAction(self, agent, action):
         """
         Subclass simulations need to deal with simulation-specific actions.
 
@@ -444,15 +331,16 @@ class Simulation(Entity):
         """
         pass
 
-    def GetActionData(self, *args):
+    @abstractmethod
+    def GetActionData(self, agent, *args):
         """
         Function that needs to be overriden by subclasses to do data fetching. Each simulation will
         have to work out its own protocol.
 
         :param args:
-        :return:
+        :return: object
         """
-        return None
+        pass
 
 
     def ProcessCommand(self):
