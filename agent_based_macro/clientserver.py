@@ -5,10 +5,11 @@ Use the same object for both legs: keeps the command/response code logically org
 
 In some cases, there is no response, which is fine.
 
-The only sublcasses in this file are for the base Simulation class, which relate to time management.
+The only subclasses in this file are for the base Simulation class, which relate to time management.
 """
 
 import time
+
 
 class ClientServerMsg(object):
     def __init__(self, *args):
@@ -19,22 +20,22 @@ class ClientServerMsg(object):
         self.args = args
         self.ClientID = None
 
-    def ServerCommand(self, server, *args):
-        'The server will call this to execute the command'
+    def server_command(self, server, *args):
+        """The server will call this to execute the command"""
         pass
 
-    def ClientMessage(self, client, *args):
-        'The client will call this to get the message payload.'
+    def client_message(self, client, *args):
+        """The client will call this to get the message payload."""
         pass
 
 
 class MsgPause(ClientServerMsg):
-    def ServerCommand(self, server, *args):
+    def server_command(self, server, *args):
         server.IsPaused = True
 
 
 class MsgUnpause(ClientServerMsg):
-    def ServerCommand(self, server, *args):
+    def server_command(self, server, *args):
         # Do nothing if unpaused
         if not server.IsPaused:
             return
@@ -43,12 +44,12 @@ class MsgUnpause(ClientServerMsg):
 
 
 class MsgTimeQuery(ClientServerMsg):
-    def ServerCommand(self, server, *args):
+    def server_command(self, server, *args):
         response = MsgTimeQuery(server.IsPaused, server.Time)
         response.ClientID = self.ClientID
-        server.QueueMessage(response)
+        server.queue_message(response)
 
-    def ClientMessage(self, client, ispaused, ttime):
+    def client_message(self, client, ispaused, ttime):
         # ispaused, ttime = self.args
         client.IsPaused = ispaused
         client.Time = ttime

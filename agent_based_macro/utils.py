@@ -9,23 +9,23 @@ Miscellaneous functions and classes
 import math
 
 
-
-GLastJitter = 0
+G_LAST_JITTER = 0
 # Create the jitter matrix. Done once on import
-GJitter = []
+G_JITTER = []
 
-for i in range(0,10):
-    GJitter.append(float(i)/20.)
-    GJitter.append(0.5 + float(i)/20.)
-GJitter.append(1.)
+for i in range(0, 10):
+    G_JITTER.append(float(i) / 20.)
+    G_JITTER.append(0.5 + float(i) / 20.)
+G_JITTER.append(1.)
+
 
 def reset_jitter():
     """
     Reset the jitter sequence. Only needed to ensure deterministic sequences (unit tests).
     :return: None
     """
-    global GLastJitter
-    GLastJitter = 0
+    global G_LAST_JITTER
+    G_LAST_JITTER = 0
 
 
 def jitter_time(time_range):
@@ -34,12 +34,12 @@ def jitter_time(time_range):
     :param time_range: tuple
     :return: float
     """
-    global GLastJitter
-    global GJitter
-    GLastJitter += 1
-    if GLastJitter == len(GJitter):
-        GLastJitter = 0
-    return  time_range[0] + GJitter[GLastJitter]*(time_range[1] - time_range[0])
+    global G_LAST_JITTER
+    global G_JITTER
+    G_LAST_JITTER += 1
+    if G_LAST_JITTER == len(G_JITTER):
+        G_LAST_JITTER = 0
+    return time_range[0] + G_JITTER[G_LAST_JITTER] * (time_range[1] - time_range[0])
 
 
 class TimeSeries(object):
@@ -67,7 +67,7 @@ class TimeSeries(object):
         self.Frequency = freq
         self.FillValue = fill
 
-    def GetIndexAndGrow(self, t, grow=True):
+    def get_index_and_grow(self, t, grow=True):
         """
         Return the index associated with time t.
 
@@ -84,7 +84,7 @@ class TimeSeries(object):
             self.Data = self.Data + [self.FillValue]*TimeSeries.ChunkSize*numchunks
         return res
 
-    def Set(self, val, time=None):
+    def set(self, val, time=None):
         """
         Set the value of the TimeSeries at the index defined by the time.
         If the time value is not supplied, uses TimeSeries.Time
@@ -94,10 +94,10 @@ class TimeSeries(object):
         """
         if time is None:
             time = TimeSeries.Time
-        idx = self.GetIndexAndGrow(time, grow=True)
+        idx = self.get_index_and_grow(time, grow=True)
         self.Data[idx] = val
 
-    def Add(self, val, time=None):
+    def add(self, val, time=None):
         """
         Add to the entry associated with the given time.
 
@@ -109,7 +109,7 @@ class TimeSeries(object):
         """
         if time is None:
             time = TimeSeries.Time
-        idx = self.GetIndexAndGrow(time, grow=True)
+        idx = self.get_index_and_grow(time, grow=True)
         if self.Data[idx] is None:
             # Unset entry, treat as 0.
             self.Data[idx] = val
@@ -123,7 +123,7 @@ class TimeSeries(object):
         :param val: float
         :return: TimeSeries
         """
-        return self.Add(val, time=TimeSeries.Time)
+        return self.add(val, time=TimeSeries.Time)
 
     def __isub__(self, val):
         """
@@ -131,9 +131,9 @@ class TimeSeries(object):
         :param val: float
         :return: TimeSeries
         """
-        return self.Add(-val, time=TimeSeries.Time)
+        return self.add(-val, time=TimeSeries.Time)
 
-    def Get(self, time=None):
+    def get(self, time=None):
         """
         Get value from a time. If time is None, uses TimeSeries.Time
 
@@ -146,14 +146,8 @@ class TimeSeries(object):
         """
         if time is None:
             time = TimeSeries.Time
-        idx = self.GetIndexAndGrow(time, grow=False)
+        idx = self.get_index_and_grow(time, grow=False)
         if idx >= len(self.Data):
             return self.FillValue
         else:
             return self.Data[idx]
-
-
-
-
-
-

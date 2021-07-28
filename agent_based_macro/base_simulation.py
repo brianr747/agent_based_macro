@@ -107,10 +107,9 @@ class ReserveType(enum.Enum):
     WAGES = 3
 
 
-
 class InventoryInfo(object):
-    def __init__(self, commodity_ID):
-        self.CommodityID = commodity_ID
+    def __init__(self, commodity_id):
+        self.CommodityID = commodity_id
         self.Amount = 0
         self.Cost = 0
         self.Reserved = 0
@@ -130,7 +129,7 @@ class InventoryInfo(object):
         self.Amount += amount
         self.Cost += cost
 
-    def ChangeReserves(self, amount):
+    def change_reserves(self, amount):
         """
         Change the reserved amount. May be positive or negative.
         :param amount: int
@@ -142,12 +141,13 @@ class InventoryInfo(object):
         if self.Reserved < 0:
             raise ValueError('Attempting to set negative reserves')
 
-    def RemoveInventory(self, amount, from_reserve=False):
+    def remove_inventory(self, amount, from_reserve=False):
         """
-        Remove inventory units, returns the Cost Of Goods Sold (COGS)
+        Remove inventory units, returns the Cost Of Goods Sold (cogs)
 
         Throws a ValueError if attempt to remove more than exists, or more than unreserved inventory
         :param amount: int
+        :param from_reserve: bool
         :return: int
         """
         if amount < 0:
@@ -161,13 +161,14 @@ class InventoryInfo(object):
             if amount > self.Reserved:
                 raise ValueError('Attempting to remove more than reserved')
             self.Reserved -= amount
+        # cogs = COGS = standard acronym for "cost of goods sold"
         if amount == self.Amount:
-            COGS = self.Cost
+            cogs = self.Cost
         else:
-            COGS = round(float(self.Cost * amount) / float(self.Amount))
-        self.Cost -= COGS
+            cogs = round(float(self.Cost * amount) / float(self.Amount))
+        self.Cost -= cogs
         self.Amount -= amount
-        return COGS
+        return cogs
 
 
 class Inventory(object):
@@ -193,7 +194,6 @@ class Inventory(object):
         return self.Commodities[item]
 
 
-
 class Agent(agent_based_macro.entity.Entity):
     """
     An agent is an entity that can do transactions, and thus has money accounts.
@@ -202,10 +202,10 @@ class Agent(agent_based_macro.entity.Entity):
     TopParentID = top of ownership hierarchy (= "faction")
     """
 
-    def __init__(self, name, money_balance=0, location_ID=None):
+    def __init__(self, name, money_balance=0, location_id=None):
         super().__init__(name, 'agent')
         self.Money = money_balance
-        self.LocationID = location_ID
+        self.LocationID = location_id
         self.ReserveMoney = 0
         self.ReserveWages = 0
         self.ReserveTax = 0
@@ -218,18 +218,18 @@ class Agent(agent_based_macro.entity.Entity):
         # We allow central government entities to run negative money balances, because MMT
         self.IsCentralGovernment = False
 
-    def ReceiveMoney(self, amount):
+    def receive_money(self, amount):
         """
         Always OK, unless negative amount (!).
         :param amount: int
         :return:
         """
         if amount < 0:
-            self.SpendMoney(-amount)
+            self.spend_money(-amount)
             return
         self.Money += amount
 
-    def SpendMoney(self, amount, from_reserve=ReserveType.NONE):
+    def spend_money(self, amount, from_reserve=ReserveType.NONE):
         """
         Attempt to spend money. Can throw exceptions, in which case nothing happens.
 
@@ -249,7 +249,7 @@ class Agent(agent_based_macro.entity.Entity):
         if amount < 0:
             if not ReserveType.NONE == from_reserve:
                 raise ValueError('Attempting to spend negative amount from a reserve - huh?')
-            self.ReceiveMoney(-amount)
+            self.receive_money(-amount)
             return
         if amount > self.Money:
             raise NoMoneyError(f'Too much money: [{self.GID}] ${amount}')
@@ -275,7 +275,7 @@ class Agent(agent_based_macro.entity.Entity):
         self.Money -= amount
         self.ReserveMoney -= amount
 
-    def ChangeReserves(self, change, reserve_type=ReserveType.ORDERS):
+    def change_reserves(self, change, reserve_type=ReserveType.ORDERS):
         """
         Change the reserve amount. May throw an error, in which case nothing happens.
         :param change: int
@@ -317,7 +317,7 @@ class Agent(agent_based_macro.entity.Entity):
                 raise ValueError('Must specify valid reserve type')
             self.ReserveMoney += change
 
-    def RegisterEvents(self):
+    def register_events(self):
         """
         Called by the simulation.
 
@@ -327,24 +327,24 @@ class Agent(agent_based_macro.entity.Entity):
         """
         return ()
 
-    def BuyGoods(self, commodity_ID, amount, payment):
+    def buy_goods(self, commodity_id, amount, payment):
         """
         Do the operations for buying a good.
 
-        :param commodity_ID: int
+        :param commodity_id: int
         :param amount: int
         :param payment: int
         :return:
         """
-        self.SpendMoney(payment, from_reserve=ReserveType.ORDERS)
-        self.Inventory[commodity_ID].add_inventory(amount, payment)
+        self.spend_money(payment, from_reserve=ReserveType.ORDERS)
+        self.Inventory[commodity_id].add_inventory(amount, payment)
 
-    def SellGoods(self, commodity_ID, amount, payment):
-        self.ReceiveMoney(payment)
+    def sell_goods(self, commodity_id, amount, payment):
+        self.receive_money(payment)
         # Need to expense COGS
-        COGS = self.Inventory[commodity_ID].RemoveInventory(amount, from_reserve=True)
+        cogs = self.Inventory[commodity_id].remove_inventory(amount, from_reserve=True)
 
-    def GetInfo(self):
+    def get_info(self):
         return f'{self.GID}'
 
 
@@ -388,15 +388,15 @@ class ProducerLabour(Agent):
         self.LinearProduction = 15.
         self.Employer = True
 
-    def DailyProduction(self):
+    def daily_production(self):
         """
         Production function on a daily basis. Returns a float. The time between production events is the inverse
         of this value.
         :return: float
         """
-        return (self.LinearProduction) * float(self.WorkersActual)
+        return self.LinearProduction * float(self.WorkersActual)
 
-    def UnitCost(self):
+    def unit_cost(self):
         """
         Unit Cost of production (float).
 
@@ -404,14 +404,14 @@ class ProducerLabour(Agent):
         nonlinearities, so we need to calculate the daily production
         :return: float
         """
-        return self.DailyProduction() / float(self.WorkersActual * self.Wage)
+        return self.daily_production() / float(self.WorkersActual * self.Wage)
 
 
 class CentralGovernment(Agent):
     def __init__(self):
         super().__init__(name='CentralGovernment', money_balance=0)
 
-    def SpendMoney(self, amount, from_reserve=ReserveType.NONE):
+    def spend_money(self, amount, from_reserve=ReserveType.NONE):
         """
         Can always spend money, reserves are ignored.
 
@@ -429,9 +429,9 @@ class JobGuarantee(Agent):
     Although ech planet has its own agent, transactions use the central government money account.
     """
 
-    def __init__(self, location_id, central_gov_ID, job_guarantee_wage, num_workers=0):
-        super().__init__(money_balance=0, name='JobGuarantee', location_ID=location_id)
-        self.CentralGovID = central_gov_ID
+    def __init__(self, location_id, central_gov_id, job_guarantee_wage, num_workers=0):
+        super().__init__(money_balance=0, name='JobGuarantee', location_id=location_id)
+        self.CentralGovID = central_gov_id
         self.WorkersActual = num_workers
         self.Employer = True
         self.Inventory = Inventory()
@@ -441,13 +441,13 @@ class JobGuarantee(Agent):
         self.HouseholdGID = None
         self.EmployerDict = weakref.WeakValueDictionary()
 
-    def SpendMoney(self, amount, from_reserve=ReserveType.NONE):
-        self.get_entity(self.CentralGovID).SpendMoney(amount)
+    def spend_money(self, amount, from_reserve=ReserveType.NONE):
+        self.get_entity(self.CentralGovID).spend_money(amount)
 
-    def ReceiveMoney(self, amount):
-        self.get_entity(self.CentralGovID).ReceiveMoney(amount)
+    def receive_money(self, amount):
+        self.get_entity(self.CentralGovID).receive_money(amount)
 
-    def FindEmployers(self):
+    def find_employers(self):
         """
         Find all the employers on a location. Call during initialisation step.
 
@@ -463,15 +463,15 @@ class JobGuarantee(Agent):
                 if ent.IsEmployer:
                     self.EmployerDict[ent.GID] = ent
 
-    def RegisterEvents(self):
+    def register_events(self):
         """
 
         :return: list
         """
-        payment_event = simulation.ActionEvent(self.GID, self.event_Production, 0., 1.)
+        payment_event = simulation.ActionEvent(self.GID, self.event_production, 0., 1.)
         return [(payment_event, (0., 0.1))]
 
-    def event_Production(self, *args):
+    def event_production(self, *args):
         sim = agent_based_macro.entity.Entity.get_simulation()
         if self.HouseholdGID is None:
             try:
@@ -487,13 +487,13 @@ class JobGuarantee(Agent):
         # HH = agent_based_macro.entity.Entity.GetEntity(self.HouseholdGID)
         # HH.ReceiveWages(payment)
         # JG Production
-        food_id = sim.GetCommodityByName('Fud')
+        food_id = sim.get_commodity_by_name('Fud')
         loc = agent_based_macro.entity.Entity.get_entity(self.LocationID)
         production = self.WorkersActual * loc.ProductivityDict[food_id]
         self.Inventory[food_id].add_inventory(production, payment)
-        sim.QueueEventDelay(self.GID, self.event_SetOrders, .1)
+        sim.queue_event_delay(self.GID, self.event_set_orders, .1)
 
-    def event_SetOrders(self):
+    def event_set_orders(self):
         """
         Set up buy/sell orders.
 
@@ -503,22 +503,22 @@ class JobGuarantee(Agent):
         :return:
         """
         sim = agent_based_macro.entity.Entity.get_simulation()
-        food_id = sim.GetCommodityByName('Fud')
+        food_id = sim.get_commodity_by_name('Fud')
         location = agent_based_macro.entity.Entity.get_entity(self.LocationID)
-        market = sim.GetMarket(self.LocationID, food_id)
+        market = sim.get_market(self.LocationID, food_id)
         production_price = self.JobGuaranteeWage / location.ProductivityDict[food_id]
         # Create a floor price
         buyorder = BuyOrder(production_price * .95, 300, self.GID)
-        market.AddNamedBuy(agent=self, name='floor', order=buyorder)
+        market.add_named_buy(agent=self, name='floor', order=buyorder)
         # Sell production
         amount = self.Inventory[food_id].Amount - self.Inventory[food_id].Reserved
         sellorder = SellOrder(production_price * 1.1, amount, self.GID)
-        market.AddNamedSell(agent=self, name='production', order=sellorder)
+        market.add_named_sell(agent=self, name='production', order=sellorder)
 
 
 class HouseholdSector(Agent):
     def __init__(self, location_id, money_balance, target_money, name='household'):
-        super().__init__(name, money_balance, location_ID=location_id)
+        super().__init__(name, money_balance, location_id=location_id)
         self.TargetMoney = target_money
         self.DailyEarnings = 0
 
@@ -531,22 +531,22 @@ class HouseholdSector(Agent):
         :return:
         """
         sim = agent_based_macro.entity.Entity.get_entity(agent_based_macro.entity.SIMULATION_ID)
-        self.ReceiveMoney(amount)
+        self.receive_money(amount)
         # Do something more sophisticated for tax payment later.
         taxes = math.floor(0.1 * amount)
-        self.ChangeReserves(taxes, ReserveType.TAX)
-        sim.PayTaxes(self.GID, taxes)
+        self.change_reserves(taxes, ReserveType.TAX)
+        sim.pay_taxes(self.GID, taxes)
         self.DailyEarnings += (amount - taxes)
 
-    def RegisterEvents(self):
+    def register_events(self):
         """
 
         :return: list
         """
-        payment_event = simulation.Event(self.GID, self.event_CalculateSpending, 0., 1.)
+        payment_event = simulation.Event(self.GID, self.event_calculate_spending, 0., 1.)
         return [(payment_event, (0.6, 0.7))]
 
-    def event_CalculateSpending(self):
+    def event_calculate_spending(self):
         """
         Every day, put in a market order for available spending budget.
 
@@ -563,10 +563,10 @@ class HouseholdSector(Agent):
         # This will cancel any existing order, which will free up cash if the previous day's order
         # was not filled.
         sim = agent_based_macro.entity.Entity.get_simulation()
-        food_id = sim.GetCommodityByName('Fud')
+        food_id = sim.get_commodity_by_name('Fud')
         location = agent_based_macro.entity.Entity.get_entity(self.LocationID)
-        market = sim.GetMarket(self.LocationID, food_id)
-        ask = market.GetAsk()
+        market = sim.get_market(self.LocationID, food_id)
+        ask = market.get_ask()
         # No ask price, no bid!
         if ask is not None:
             bid_price = int(0.95 * ask)
@@ -579,14 +579,14 @@ class HouseholdSector(Agent):
             amount = math.floor(targ_spend / bid_price)
             if amount > 0:
                 order = BuyOrder(bid_price, amount, self.GID)
-                market.AddNamedBuy(agent=self, name='DailyBid', order=order)
+                market.add_named_buy(agent=self, name='DailyBid', order=order)
         # Then add an event for a market order
-        sim.QueueEventDelay(self.GID, self.event_MarketOrder, .6)
+        sim.queue_event_delay(self.GID, self.event_market_order, .6)
         # Need to reset daily Earnings. Could be done as a seperate event, but will need a time series
         # object.
         self.DailyEarnings = 0
 
-    def event_MarketOrder(self):
+    def event_market_order(self):
         """
         If there is any available spending power, hit the ask.
 
@@ -595,10 +595,10 @@ class HouseholdSector(Agent):
         :return:
         """
         sim = agent_based_macro.entity.Entity.get_simulation()
-        food_id = sim.GetCommodityByName('Fud')
+        food_id = sim.get_commodity_by_name('Fud')
         location = agent_based_macro.entity.Entity.get_entity(self.LocationID)
-        market = sim.GetMarket(self.LocationID, food_id)
-        ask = market.GetAsk()
+        market = sim.get_market(self.LocationID, food_id)
+        ask = market.get_ask()
         if ask is None:
             # Nothing available, no market order!
             return
@@ -611,20 +611,20 @@ class HouseholdSector(Agent):
         if amount < 1:
             return
         order = BuyOrder(price, amount, self.GID)
-        market.AddNamedBuy(agent=self, name='"MarketOrder"', order=order)
+        market.add_named_buy(agent=self, name='"MarketOrder"', order=order)
 
 
 class Market(agent_based_macro.entity.Entity):
-    def __init__(self, name, locationID, commodityID):
+    def __init__(self, name, location_id, commodity_id):
         super().__init__(name, ttype='market')
-        self.LocationID = locationID
-        self.CommodityID = commodityID
+        self.LocationID = location_id
+        self.CommodityID = commodity_id
         self.BuyList = OrderQueue()
         self.SellList = OrderQueue()
         self.LastPrice = None
         self.LastTime = 0.
 
-    def AddNamedBuy(self, agent, name, order):
+    def add_named_buy(self, agent, name, order):
         """
         Allow agents to keep a "named" order. New orders automatically cancel order with the same name.
         :param agent: Agent
@@ -633,19 +633,19 @@ class Market(agent_based_macro.entity.Entity):
         :return:
         """
         name = 'buy_' + name
-        ID_existing = agent.NamedOrders.get(name, None)
-        if ID_existing is not None:
-            self.RemoveBuy(agent, ID_existing)
-        self.AddBuy(order)
+        id_existing = agent.NamedOrders.get(name, None)
+        if id_existing is not None:
+            self.remove_buy(agent, id_existing)
+        self.add_buy(order)
         agent.NamedOrders[name] = order.OrderID
 
-    def RemoveBuy(self, agent, orderID):
-        order = self.BuyList.RemoveOrder(orderID)
+    def remove_buy(self, agent, order_id):
+        order = self.BuyList.remove_order(order_id)
         if order is not None:
             value = order.Price * order.Amount
-            agent.ChangeReserves(-value, ReserveType.ORDERS)
+            agent.change_reserves(-value, ReserveType.ORDERS)
 
-    def AddNamedSell(self, agent, name, order):
+    def add_named_sell(self, agent, name, order):
         """
         Allow agents to keep a "named" order. New orders automatically cancel order with the same name.
         :param agent: Agent
@@ -654,18 +654,18 @@ class Market(agent_based_macro.entity.Entity):
         :return:
         """
         name = 'sel_' + name
-        ID_existing = agent.NamedOrders.get(name, None)
-        if ID_existing is not None:
-            self.RemoveSell(agent, ID_existing)
-        self.AddSell(order)
+        id_existing = agent.NamedOrders.get(name, None)
+        if id_existing is not None:
+            self.remove_sell(agent, id_existing)
+        self.add_sell(order)
         agent.NamedOrders[name] = order.OrderID
 
-    def RemoveSell(self, agent, orderID):
-        order = self.SellList.RemoveOrder(orderID)
+    def remove_sell(self, agent, order_id):
+        order = self.SellList.remove_order(order_id)
         if order is not None:
-            agent.Inventory[self.CommodityID].ChangeReserves(-order.Amount)
+            agent.Inventory[self.CommodityID].change_reserves(-order.Amount)
 
-    def AddBuy(self, buyorder):
+    def add_buy(self, buyorder):
         """
         Add a buy order.
 
@@ -681,42 +681,42 @@ class Market(agent_based_macro.entity.Entity):
         :return:
         """
         buyer = agent_based_macro.entity.Entity.get_entity(buyorder.FirmGID)
-        buyer.ChangeReserves(buyorder.Amount * buyorder.Price, ReserveType.ORDERS)
+        buyer.change_reserves(buyorder.Amount * buyorder.Price, ReserveType.ORDERS)
         # If the buy price is less than the ask, we insert into BuyList
         # Otherwise, we transact until either the buy order is completely filled, or
         # the ask has risen past the new order's bid
         while True:
             if len(self.SellList) == 0:
                 # No sellers, so automatically add to BuyList
-                self.BuyList.InsertOrder(buyorder)
+                self.BuyList.insert_order(buyorder)
                 return
             ask = self.SellList[0].Price
             if buyorder.Price < ask:
-                self.BuyList.InsertOrder(buyorder)
+                self.BuyList.insert_order(buyorder)
                 return
             else:
                 # Transaction!
                 self.LastPrice = ask
-                self.LastTime = simulation.GetSimulation().Time
+                self.LastTime = simulation.get_simulation().Time
                 amount = min(self.SellList[0].Amount, buyorder.Amount)
                 seller = agent_based_macro.entity.Entity.get_entity(self.SellList[0].FirmGID)
                 payment = amount * ask
                 #
-                buyer.SpendMoney(payment, from_reserve=ReserveType.ORDERS)
-                seller.ReceiveMoney(payment)
+                buyer.spend_money(payment, from_reserve=ReserveType.ORDERS)
+                seller.receive_money(payment)
                 buyer.Inventory[self.CommodityID].add_inventory(amount, payment)
-                COGS = seller.Inventory[self.CommodityID].RemoveInventory(amount, from_reserve=True)
+                cogs = seller.Inventory[self.CommodityID].remove_inventory(amount, from_reserve=True)
                 # TODO: Register loss from COGS
                 # Then, remove orders as needed.
                 buyorder.Amount -= amount
                 self.SellList[0].Amount -= amount
                 # Remove the front of the sell list if empty.
-                self.SellList.CheckEmpty()
+                self.SellList.check_empty()
                 if buyorder.Amount == 0:
                     # Order has been cleared out, quit processing.
                     return
 
-    def AddSell(self, sellorder):
+    def add_sell(self, sellorder):
         """
         Add a sell order.
 
@@ -734,7 +734,7 @@ class Market(agent_based_macro.entity.Entity):
         # Note: I have essentially just mirrored code, which is probably bad, but at least it is
         # easy to follow.
         seller = agent_based_macro.entity.Entity.get_entity(sellorder.FirmGID)
-        seller.Inventory[self.CommodityID].ChangeReserves(sellorder.Amount)
+        seller.Inventory[self.CommodityID].change_reserves(sellorder.Amount)
 
         # If the sell price is greater than the bid, we insert into SellList
         # Otherwise, we transact until either the order is completely filled, or
@@ -742,41 +742,41 @@ class Market(agent_based_macro.entity.Entity):
         while True:
             if len(self.BuyList) == 0:
                 # No sellers, so automatically add to BuyList
-                self.SellList.InsertOrder(sellorder)
+                self.SellList.insert_order(sellorder)
                 return
             bid = self.BuyList[0].Price
             if sellorder.Price > bid:
-                self.SellList.InsertOrder(sellorder)
+                self.SellList.insert_order(sellorder)
                 return
             else:
                 # Transaction!
                 self.LastPrice = bid
-                self.LastTime = simulation.GetSimulation().Time
+                self.LastTime = simulation.get_simulation().Time
                 amount = min(self.BuyList[0].Amount, sellorder.Amount)
                 buyer = agent_based_macro.entity.Entity.get_entity(self.BuyList[0].FirmGID)
 
                 payment = amount * bid
                 #
-                buyer.SpendMoney(payment, from_reserve=ReserveType.ORDERS)
-                seller.ReceiveMoney(payment)
+                buyer.spend_money(payment, from_reserve=ReserveType.ORDERS)
+                seller.receive_money(payment)
                 buyer.Inventory[self.CommodityID].add_inventory(amount, payment)
-                COGS = seller.Inventory[self.CommodityID].RemoveInventory(amount, from_reserve=True)
+                cogs = seller.Inventory[self.CommodityID].remove_inventory(amount, from_reserve=True)
                 # TODO: Register loss from COGS
                 # Clear out empty orders as needed
                 self.BuyList[0].Amount -= amount
                 sellorder.Amount -= amount
-                self.BuyList.CheckEmpty()
+                self.BuyList.check_empty()
                 if sellorder.Amount == 0:
                     # Order has been completely filled, quit processing
                     return
 
-    def GetBid(self):
+    def get_bid(self):
         if len(self.BuyList) > 0:
             return self.BuyList[0].Price
         else:
             return None
 
-    def GetAsk(self):
+    def get_ask(self):
         if len(self.SellList) > 0:
             return self.SellList[0].Price
         else:
@@ -802,23 +802,23 @@ class Market(agent_based_macro.entity.Entity):
 class TravellingAgent(Agent):
     NoLocationID = None
 
-    def __init__(self, name, coords, start_ID, travelling_to_ID, speed=2.):
+    def __init__(self, name, coords, start_id, travelling_to_id, speed=2.):
         super().__init__(name)
         self.StartCoordinates = coords
-        self.StartLocID = start_ID
+        self.StartLocID = start_id
         self.StartTime = 0.
         self.Speed = speed
-        self.TargetLocID = travelling_to_ID
-        target = agent_based_macro.entity.Entity.get_entity(travelling_to_ID)
+        self.TargetLocID = travelling_to_id
+        target = agent_based_macro.entity.Entity.get_entity(travelling_to_id)
         self.TargetCoordinates = target.Coordinates
         self.ArrivalTime = 0.
         if self.StartCoordinates == target.Coordinates:
             # Already there
-            self.StartLocID = travelling_to_ID
+            self.StartLocID = travelling_to_id
         else:
             raise NotImplementedError('No support for spawning ship away from planet')
 
-    def GetCoordinate(self, ttime):
+    def get_coordinates(self, ttime):
         """
         For now, the server will calculate all locations and update upon request.
 
@@ -842,20 +842,20 @@ class TravellingAgent(Agent):
                 out = [s + progress * (t - s) for s, t in zip(self.StartCoordinates, self.TargetCoordinates)]
                 return tuple(out)
 
-    def StartMoving(self, new_Target, ttime):
+    def start_moving(self, new_target, ttime):
         """
         Move to a new target (always a location, not an arbitrary point.
-        :param new_Target:
+        :param new_target:
         :param ttime:
         :return:
         """
-        coords = self.GetCoordinate(ttime)
+        coords = self.get_coordinates(ttime)
         self.StartLocID = self.LocationID
         self.StartTime = ttime
         self.StartCoordinates = coords
         self.LocationID = TravellingAgent.NoLocationID
-        self.TargetLocID = new_Target
-        target_loc = agent_based_macro.entity.Entity.get_entity(new_Target)
+        self.TargetLocID = new_target
+        target_loc = agent_based_macro.entity.Entity.get_entity(new_target)
         self.TargetCoordinates = target_loc.Coordinates
         # Calculate distance
         dist = 0.
@@ -871,9 +871,9 @@ class TravellingAgent(Agent):
             coords = self.StartCoordinates
             location = self.StartLocID
         else:
-            sim = simulation.GetSimulation()
+            sim = simulation.get_simulation()
             ttime = sim.Time
-            coords = self.GetCoordinate(ttime)
+            coords = self.get_coordinates(ttime)
             location = self.LocationID
         info['Coordinates'] = coords
         info['Location'] = location
@@ -897,12 +897,12 @@ class BaseSimulation(simulation.Simulation):
         self.Markets = {}
         self.Households = {}
         gov = CentralGovernment()
-        self.AddEntity(gov)
+        self.add_entity(gov)
         self.CentralGovernmentID = gov.GID
         # A location that is not really a location -- off the logical grid.
         self.NonLocationID = None
 
-    def AddEntity(self, entity):
+    def add_entity(self, entity):
         """
         When we add an Entity that has a money balance, subtract the amount from the CentralGovernment.
         This way we ensure that CentralGovernment Money liability matches private sector Money assets
@@ -911,7 +911,7 @@ class BaseSimulation(simulation.Simulation):
         :param entity: Entity
         :return:
         """
-        super().AddEntity(entity)
+        super().add_entity(entity)
         if hasattr(entity, 'Money'):
             try:
                 gov = agent_based_macro.entity.Entity.get_entity(self.CentralGovernmentID)
@@ -920,27 +920,27 @@ class BaseSimulation(simulation.Simulation):
                 return
             gov.Money -= entity.Money
 
-    def AddLocation(self, location):
-        self.AddEntity(location)
+    def add_location(self, location):
+        self.add_entity(location)
         self.Locations.append(location.GID)
 
-    def AddCommodity(self, commodity):
-        self.AddEntity(commodity)
+    def add_commodity(self, commodity):
+        self.add_entity(commodity)
         self.Commodities.append(commodity.GID)
 
-    def AddHousehold(self, household):
+    def add_household(self, household):
         """
         Add a household sector object.
         :param household: HouseholdSector
         :return: None
         """
-        self.AddEntity(household)
+        self.add_entity(household)
         self.Households[household.LocationID] = household.GID
 
-    def GetMarket(self, loc_id, commod_id):
+    def get_market(self, loc_id, commod_id):
         return self.Markets[(loc_id, commod_id)]
 
-    def GetCommodityByName(self, commodity_name):
+    def get_commodity_by_name(self, commodity_name):
         """
         Get the commodity_ID via name.
         Needed by Agents that refer to hard-coded commodities.
@@ -953,7 +953,7 @@ class BaseSimulation(simulation.Simulation):
             if c_obj.Name == commodity_name:
                 return c
 
-    def GenerateMarkets(self):
+    def generate_markets(self):
         """
         Call this after all locations and commodities are built, so long as you want all combinations supported
         :return:
@@ -964,29 +964,29 @@ class BaseSimulation(simulation.Simulation):
                 com = agent_based_macro.entity.Entity.get_entity(commod_id)
                 name = f'{com.Name}@{loc.Name}'
                 market = Market(name, loc_id, commod_id)
-                self.AddEntity(market)
+                self.add_entity(market)
                 self.Markets[(loc_id, commod_id)] = market
                 self.Markets[(loc_id, com.Name)] = market
 
-    def PayTaxes(self, taxpayer_GID, amount):
+    def pay_taxes(self, taxpayer_gid, amount):
         """
         Have entity pay taxes (if it exists).
-        :param taxpayer_GID: int
+        :param taxpayer_gid: int
         :param amount: int
         :return:
         """
         try:
-            sucker = agent_based_macro.entity.Entity.get_entity(taxpayer_GID)
+            sucker = agent_based_macro.entity.Entity.get_entity(taxpayer_gid)
         except KeyError:
             return
-        sucker.SpendMoney(amount, ReserveType.TAX)
+        sucker.spend_money(amount, ReserveType.TAX)
         cgov = agent_based_macro.entity.Entity.get_entity(self.CentralGovernmentID)
-        cgov.ReceiveMoney(amount)
+        cgov.receive_money(amount)
 
-    def GetActionData(self, agent, *args):
+    def get_action_data(self, agent, *args):
         raise NotImplementedError('need GetActionData')
 
-    def ProcessAction(self, agent, action):
+    def process_action(self, agent, action):
         """
         Handle custom actions (not data or callback actions)
 
@@ -1009,7 +1009,7 @@ class BaseSimulation(simulation.Simulation):
                 raise ValueError('PayWages Action: Need to specify amount as second parameter')
             else:
                 amount = int(action.args[1])
-            agent.SpendMoney(amount=amount)
+            agent.spend_money(amount=amount)
             household.receive_wages(amount=amount)
         else:
             raise ValueError(f'Unknown Action arguments: {action.args}')

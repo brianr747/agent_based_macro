@@ -23,7 +23,7 @@ class OrderQueue(object):
     def __len__(self):
         return len(self.Orders)
 
-    def CheckEmpty(self):
+    def check_empty(self):
         """
         If the front order has an Amount of 0, pop it. Since the quantity has been reduced to zero,
         no accounting issues.
@@ -33,20 +33,20 @@ class OrderQueue(object):
             if self.Orders[0].Amount == 0:
                 self.Orders.pop(0)
 
-    def InsertOrder(self, order):
+    def insert_order(self, order):
         bisect.insort_right(self.Orders, order)
 
-    def RemoveOrder(self, order_ID):
+    def remove_order(self, order_id):
         """
 
         Returns the removed order, or None if it does not exist.
 
-        :param order_ID:
+        :param order_id:
         :return: BaseOrder
         """
         found = None
         for order in self.Orders:
-            if order.OrderID == order_ID:
+            if order.OrderID == order_id:
                 found = order
                 break
         if found is not None:
@@ -70,9 +70,9 @@ class BaseOrder(object):
         GLastOrderID -= 1
 
     @staticmethod
-    def GetOrder(orderID):
+    def get_order(order_id):
         global GOrderDict
-        return GOrderDict[orderID]
+        return GOrderDict[order_id]
 
     def __lt__(self, other):
         """Comparison order for insertion into OrderQueue"""

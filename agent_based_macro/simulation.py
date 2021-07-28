@@ -49,7 +49,7 @@ from agent_based_macro.entity import EntityDoesNotExist, EntityDead, Entity, res
 GSimulation = None
 
 
-def GetSimulation():
+def get_simulation():
     """
     We only allow a single Simulation object to exist.
     :return:
@@ -93,7 +93,7 @@ class Event(object):
         return self.Callback(*self.args)
 
 
-def QueueEvent(event):
+def queue_event(event):
     """
     Insert an Event object into the (global) event queue.
 
@@ -118,7 +118,7 @@ class ActionEvent(Event):
         super().__init__(gid, callback, calltime, repeat, args)
         self.DataRequests = []
 
-    def AddDataRequest(self, name, *args):
+    def add_data_request(self, name, *args):
         """
         Add a data request that will have data stored under "name"
         :param name: str
@@ -140,7 +140,7 @@ class Client(object):
         # When did the client last get a time response (as per time.monotonic()). Used to estimate time.
         self.LastResponseMonotonic = 0.
 
-    def SendCommand(self, cmd):
+    def send_command(self, cmd):
         """
         :param cmd: ClientServerMsg
         :return:
@@ -193,18 +193,18 @@ class Simulation(ABC, Entity):
         # Clear the "global" event Queue
         Simulation.EventList = []
         # Add ourselves to the list
-        self.AddEntity(self)
+        self.add_entity(self)
         # Set the global GSimulation reference to point to this simulation
         global GSimulation
         GSimulation = self
         # How many Actions can be processed?
         self.MaxActionLimit = 100
 
-    def AddEntity(self, entity):
+    def add_entity(self, entity):
         self.EntityList.append(entity)
         if hasattr(entity, 'RegisterEvents'):
             # print('bink!')
-            evnt_list = entity.RegisterEvents()
+            evnt_list = entity.register_events()
             for (event, first_time) in evnt_list:
                 # first time is a range for the first event; use the jitter_time() function to
                 # put it at a "semi-random" point within the interval. This way we do not have a huge spike of
@@ -217,38 +217,38 @@ class Simulation(ABC, Entity):
                     if actual_time < self.Time:
                         actual_time += 1.
                 event.CallTime = actual_time
-                QueueEvent(event)
+                queue_event(event)
 
-    def QueueEventDelay(self, GID, action, delay, *args):
+    def queue_event_delay(self, gid, action, delay, *args):
         """
         Queue an event with a delay versus current time. Does not repeat.
-        :param GID: int
+        :param gid: int
         :param action:
         :param delay: int
         :param args:
         :return:
         """
-        event = Event(GID, action, self.Time + delay, None, *args)
-        QueueEvent(event)
+        event = Event(gid, action, self.Time + delay, None, *args)
+        queue_event(event)
 
-    def get_entity(self, GID):
+    def get_entity(self, gid):
         """
         Convenience function for callbacks that have the handle to the simulation
-        :param GID:
+        :param gid:
         :return:
         """
-        return agent_based_macro.entity.GEntityDict[GID]
+        return agent_based_macro.entity.GEntityDict[gid]
 
-    def Process(self):
+    def process(self):
         """
         Run a processing step. Only does one thing
         :return: bool
         """
         if len(self.ClientCommands) > 0:
-            self.ProcessCommand()
+            self.process_command()
             return True
         if len(self.ClientMessages) > 0:
-            self.ProcessClientMessageQueue()
+            self.process_client_message_queue()
             return True
         # Process events...
         if len(self.EventList) > 0:
@@ -256,7 +256,7 @@ class Simulation(ABC, Entity):
                 event = self.EventList.pop(0)
                 try:
                     if isinstance(event, ActionEvent):
-                        self.ProcessActionEvent(event)
+                        self.process_action_event(event)
                     else:
                         event()
                 except EntityDoesNotExist:
@@ -271,13 +271,13 @@ class Simulation(ABC, Entity):
                     if event.Repeat < 0.01:
                         raise ValueError('Cannot have so close a repeat value!')
                     event.CallTime = event.CallTime + event.Repeat
-                    QueueEvent(event)
+                    queue_event(event)
 
                 return True
         # Return False if nothing happened.
         return False
 
-    def ProcessActionEvent(self, actionEvent):
+    def process_action_event(self, action_event):
         """
         Special processing for an ActionEvent.
 
@@ -292,20 +292,20 @@ class Simulation(ABC, Entity):
             and new ActionCallbacks. Those callbacks are then called. This can repeat up until
             self.MAxActionLimit Actions are performed (at which point, the assumption is that there is an error).
 
-        :param actionEvent: ActionEvent
+        :param action_event: ActionEvent
         :return:
         """
         # This can throw an error if the entity no longer exists, but it needs to be caught by Process() method.
-        ent: Entity = self.get_entity(actionEvent.GID)
+        ent: Entity = self.get_entity(action_event.GID)
         # Clear the action data members
         # Data that is requested before the callback
         ent.ActionData = {}
         # Actions requested by the Entity
         ent.ActionQueue = []
-        for name, data_args in actionEvent.DataRequests:
-            ent.ActionData[name] = self.GetActionData(ent, data_args)
+        for name, data_args in action_event.DataRequests:
+            ent.ActionData[name] = self.get_action_data(ent, data_args)
         # Run the callback
-        actionEvent.Callback(actionEvent.args)
+        action_event.Callback(action_event.args)
         # Then, do the requested actions.
         cnt = 0
         while len(ent.ActionQueue) > 0:
@@ -315,42 +315,43 @@ class Simulation(ABC, Entity):
                 raise ValueError(f'Entity spawned more than {self.MaxActionLimit} Actions!')
             action = ent.ActionQueue.pop(0)
             if isinstance(action, ActionDataRequest):
-                ent.ActionData[action.Name] = self.GetActionData(ent, action.args)
+                ent.ActionData[action.Name] = self.get_action_data(ent, action.args)
             elif isinstance(action, ActionCallback):
                 action.Callback(action.args)
             else:
-                self.ProcessAction(ent, action)
+                self.process_action(ent, action)
 
     @abstractmethod
-    def ProcessAction(self, agent, action):
+    def process_action(self, agent, action):
         """
         Subclass simulations need to deal with simulation-specific actions.
 
         :param action: Action
+        :param agent: Agent
         :return:
         """
         pass
 
     @abstractmethod
-    def GetActionData(self, agent, *args):
+    def get_action_data(self, agent, *args):
         """
         Function that needs to be overriden by subclasses to do data fetching. Each simulation will
         have to work out its own protocol.
 
+        :param agent: Agent
         :param args:
         :return: object
         """
         pass
 
-
-    def ProcessCommand(self):
+    def process_command(self):
         obj = self.ClientCommands.pop(0)
         if len(obj.args) == 0:
-            obj.ServerCommand(self)
+            obj.server_command(self)
         else:
-            obj.ServerCommand(self, *obj.args)
+            obj.server_command(self, *obj.args)
 
-    def IncrementTime(self):
+    def increment_time(self):
         """
         To be called by an external process that makes sures the calls are slightly staggered, so that we are not
         calling time.monotonic() for every single event.
@@ -387,13 +388,13 @@ class Simulation(ABC, Entity):
         else:
             raise ValueError('Cannot call IncrementTime() in "sim" mode')
 
-    def QueueMessage(self, msg):
+    def queue_message(self, msg):
         self.ClientMessages.append((msg.ClientID, msg))
 
-    def ProcessClientMessageQueue(self):
+    def process_client_message_queue(self):
         """ This would be replaced by client-server code."""
-        clientID, msg = self.ClientMessages.pop()
+        client_id, msg = self.ClientMessages.pop()
         if len(msg.args) == 0:
-            msg.ClientMessage(self.ClientDict[clientID])
+            msg.client_message(self.ClientDict[client_id])
         else:
-            msg.ClientMessage(self.ClientDict[clientID], *msg.args)
+            msg.client_message(self.ClientDict[client_id], *msg.args)
