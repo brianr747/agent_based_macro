@@ -44,7 +44,7 @@ from abc import ABC, abstractmethod
 import agent_based_macro.entity
 import agent_based_macro.utils as utils
 from agent_based_macro.entity import EntityDoesNotExist, EntityDead, Entity, reset_entities, ActionDataRequest, \
-    ActionCallback
+    ActionCallback, ActionDelayEvent
 
 GSimulation = None
 
@@ -71,7 +71,6 @@ class Event(object):
 
     Once popped, the entity with GID will have its method event_{Callback}(args) called.
     """
-
     def __init__(self, gid, callback, calltime, repeat, *args):
         self.GID = gid
         self.Callback = callback
@@ -201,23 +200,31 @@ class Simulation(ABC, Entity):
         self.MaxActionLimit = 100
 
     def add_entity(self, entity):
+        """
+        Add an Entity to the simulation, and register events
+
+        :param entity: Entity
+        :return:
+        """
         self.EntityList.append(entity)
-        if hasattr(entity, 'RegisterEvents'):
-            # print('bink!')
-            evnt_list = entity.register_events()
-            for (event, first_time) in evnt_list:
-                # first time is a range for the first event; use the jitter_time() function to
-                # put it at a "semi-random" point within the interval. This way we do not have a huge spike of
-                # events during the day. All actions for an entity are done at the same simulation time, in
-                # specified order. This way Entities can ensure a phased logic.
-                actual_time = utils.jitter_time(first_time)
+        try:
+            event_list = entity.register_events()
+        except AttributeError:
+            # Doesn't have a register_events() method
+            return
+        for (event, first_time) in event_list:
+            # first time is a range for the first event; use the jitter_time() function to
+            # put it at a "semi-random" point within the interval. This way we do not have a huge spike of
+            # events during the day. All actions for an entity are done at the same simulation time, in
+            # specified order. This way Entities can ensure a phased logic.
+            actual_time = utils.jitter_time(first_time)
+            if actual_time < self.Time:
+                actual_time += math.floor(self.Time)
+                # Corner case
                 if actual_time < self.Time:
-                    actual_time += math.floor(self.Time)
-                    # Corner case
-                    if actual_time < self.Time:
-                        actual_time += 1.
-                event.CallTime = actual_time
-                queue_event(event)
+                    actual_time += 1.
+            event.CallTime = actual_time
+            queue_event(event)
 
     def queue_event_delay(self, gid, action, delay, *args):
         """
@@ -318,6 +325,8 @@ class Simulation(ABC, Entity):
                 ent.ActionData[action.Name] = self.get_action_data(ent, action.args)
             elif isinstance(action, ActionCallback):
                 action.Callback(action.args)
+            elif isinstance(action, ActionDelayEvent):
+                self.queue_event_delay(ent.GID, action.callback, action.delay, *action.args)
             else:
                 self.process_action(ent, action)
 
@@ -380,9 +389,9 @@ class Simulation(ABC, Entity):
                     # Possibly attempt to catch up - move the base backwards?
                     self.MonotonicBase = new_base
             else:
-                oldbase = self.MonotonicBase
+                old_base = self.MonotonicBase
                 self.MonotonicBase = time.monotonic()
-                self.Time += (self.MonotonicBase - oldbase) / self.DayLength
+                self.Time += (self.MonotonicBase - old_base) / self.DayLength
             # Keep the TimeSeries time sync'd to this time.
             utils.TimeSeries.Time = self.Time
         else:

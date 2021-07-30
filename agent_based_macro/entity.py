@@ -153,3 +153,14 @@ class ActionCallback(Action):
     def __init__(self, callback, *args):
         super().__init__(*args)
         self.Callback = callback
+
+
+class ActionDelayEvent(Action):
+    """
+    Put an Event with a delay into the simulation event queue.
+    """
+    def __init__(self, callback, delay, *args):
+        super().__init__(*args)
+        self.callback = callback
+        self.delay = delay
+        self.args = args

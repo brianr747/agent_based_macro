@@ -96,6 +96,10 @@ class TestTimeSeries(TestCase):
         self.assertEqual(obj.Data[0], 1.)
         obj.add(2., time = .2)
         self.assertEqual(3., obj.Data[0])
+        utils.TimeSeries.Time = 0.
+        obj.add(3.)
+        self.assertEqual(6., obj.Data[0])
+
 
     def test_iadd(self):
         obj = utils.TimeSeries(fill=None, freq=1.)

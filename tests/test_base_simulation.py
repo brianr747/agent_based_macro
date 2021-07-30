@@ -1,30 +1,5 @@
 from unittest import TestCase
 import agent_based_macro.base_simulation as base_simulation
-import agent_based_macro.orders
-
-
-class TestOrderQueue(TestCase):
-    def test_insert_order(self):
-        ord0 = agent_based_macro.orders.BuyOrder(21, 1, 0)
-        ord1 = agent_based_macro.orders.BuyOrder(22, 1, 1)
-        market = base_simulation.Market('market', 1, 1)
-        market.BuyList.insert_order(ord0)
-        self.assertEqual(market.BuyList[0].FirmGID, 0)
-        market.BuyList.insert_order(ord1)
-        self.assertEqual(market.BuyList[0].FirmGID, 1)
-        ord2 = agent_based_macro.orders.BuyOrder(22, 2, 2)
-        market.BuyList.insert_order(ord2)
-        self.assertEqual(market.BuyList[0].FirmGID, 1)
-        ord0 = agent_based_macro.orders.BuyOrder(21, 1, 3)
-        market.BuyList.insert_order(ord2)
-        ord3 = agent_based_macro.orders.SellOrder(22, 1, 1)
-        ord4 = agent_based_macro.orders.SellOrder(22, 2, 2)
-        market.SellList.insert_order(ord3)
-        market.SellList.insert_order(ord4)
-        self.assertEqual(market.SellList[0].FirmGID, 1)
-        ord5 = agent_based_macro.orders.SellOrder(21, 2, 5)
-        market.SellList.insert_order(ord5)
-        self.assertEqual(market.SellList[0].FirmGID, 5)
 
 
 class TestInventory(TestCase):

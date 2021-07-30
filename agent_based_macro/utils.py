@@ -1,5 +1,3 @@
-
-
 """
 Miscellaneous functions and classes
 

@@ -28,7 +28,8 @@ import enum
 import math
 
 import agent_based_macro.entity
-from agent_based_macro.orders import OrderQueue, SellOrder, BuyOrder
+from agent_based_macro.entity import Entity
+from agent_based_macro.orders import SellOrder, BuyOrder, MarketBase, OrderType
 from agent_based_macro.simulation import SimulationError
 import agent_based_macro.simulation as simulation
 
@@ -284,6 +285,7 @@ class Agent(agent_based_macro.entity.Entity):
         """
         if change > 0:
             # Central government entities ignore money reserves.
+            # TODO: override do_accounting() in the central government classes.
             if (not self.IsCentralGovernment) and (change + self.ReserveMoney > self.Money):
                 raise NoFreeMoneyError(f'Attempting to set reserves beyond money [{self.GID}]')
             # OK, let's do this
@@ -327,6 +329,73 @@ class Agent(agent_based_macro.entity.Entity):
         """
         return ()
 
+    def do_accounting(self, order_type, operation, amount, price, commodity_id):
+        """
+        Accounting in response to a market order operation.
+
+        Work is done in do_accounting_buy(), do_accounting_sell().
+
+        I've fragmented the function so that subclasses can override these methods independently.
+
+        :param order_type: OrderType
+        :param operation: str
+        :param amount: int
+        :param price: int
+        :param commodity_id: int
+        :return:
+        """
+        if amount == 0:
+            # Nothing can happen with a zero unit order.
+            return
+        if order_type == OrderType.BUY:
+            self.do_accounting_buy(operation, amount, price, commodity_id)
+        else:
+            self.do_accounting_sell(operation, amount, price, commodity_id)
+
+    def do_accounting_buy(self, operation, amount, price, commodity_id):
+        """
+        Buy order accounting.
+
+        When we add a BuyOrder, we need to reserve cash against the purchase. We then
+        release the reserves whether we cancel or fill the order. If we fill, we get the stuff
+        into inventory.
+
+        :param operation: str
+        :param amount: int
+        :param price: int
+        :param commodity_id: int
+        :return:
+        """
+        # Switch to match when I install Python 10...
+        if operation == 'add':
+            self.change_reserves(amount*price, reserve_type=ReserveType.ORDERS)
+        elif operation == 'fill':
+            self.buy_goods(commodity_id, amount, amount*price)
+        elif operation == 'remove':
+            self.change_reserves(-amount*price, reserve_type=ReserveType.ORDERS)
+        else:
+            raise ValueError(f'unknown operation: {operation}')
+
+
+    def do_accounting_sell(self, operation, amount, price, commodity_id):
+        """
+        Accounting for a SellOrder.
+
+        :param operation: str
+        :param amount: int
+        :param price: int
+        :param commodity_id: int
+        :return:
+        """
+        if operation == 'add':
+            self.Inventory[commodity_id].change_reserves(amount)
+        elif operation == 'fill':
+            self.sell_goods(commodity_id, amount, amount*price)
+        elif operation == 'remove':
+            self.Inventory[commodity_id].change_reserves(-amount)
+        else:
+            raise ValueError(f'Unsupported operation {operation}')
+
     def buy_goods(self, commodity_id, amount, payment):
         """
         Do the operations for buying a good.
@@ -353,6 +422,8 @@ class ProducerLabour(Agent):
     A firm that produces output solely based on labour input.
 
     Eventually will have producers with commodity inputs. May migrate code to a base class
+
+    Note: I started this class, but it's not been used, and the code may be out of date.
     """
 
     def __init__(self, name, money_balance, location_id, commodity_id):
@@ -483,14 +554,12 @@ class JobGuarantee(Agent):
 
         payment = self.WorkersActual * self.JobGuaranteeWage
         self.add_action('PayWages', payment)
-        # self.SpendMoney(payment)
-        # HH = agent_based_macro.entity.Entity.GetEntity(self.HouseholdGID)
-        # HH.ReceiveWages(payment)
         # JG Production
-        food_id = sim.get_commodity_by_name('Fud')
-        loc = agent_based_macro.entity.Entity.get_entity(self.LocationID)
-        production = self.WorkersActual * loc.ProductivityDict[food_id]
-        self.Inventory[food_id].add_inventory(production, payment)
+        self.add_action('ProductionLabour', 'Fud', self.WorkersActual, payment)
+        # food_id = sim.get_commodity_by_name('Fud')
+        # loc = agent_based_macro.entity.Entity.get_entity(self.LocationID)
+        # production = self.WorkersActual * loc.ProductivityDict[food_id]
+        # self.Inventory[food_id].add_inventory(production, payment)
         sim.queue_event_delay(self.GID, self.event_set_orders, .1)
 
     def event_set_orders(self):
@@ -614,15 +683,37 @@ class HouseholdSector(Agent):
         market.add_named_buy(agent=self, name='"MarketOrder"', order=order)
 
 
-class Market(agent_based_macro.entity.Entity):
+class Market(agent_based_macro.entity.Entity, MarketBase):
     def __init__(self, name, location_id, commodity_id):
-        super().__init__(name, ttype='market')
+        agent_based_macro.entity.Entity.__init__(self, name, ttype='market')
+        MarketBase.__init__(self)
         self.LocationID = location_id
         self.CommodityID = commodity_id
-        self.BuyList = OrderQueue()
-        self.SellList = OrderQueue()
-        self.LastPrice = None
-        self.LastTime = 0.
+
+    def get_time(self):
+        """
+        Return simulation.Time
+
+        (Base class does not have access to the simulation, so need to override get_time().)
+
+        :return: float
+        """
+        sim = Entity.get_simulation()
+        return sim.Time
+
+    def do_accounting(self, firm_gid, order_type, operation, amount, price):
+        """
+        Handle the accounting operations - by passing it on to the appropriate Agent
+
+        :param firm_gid: int
+        :param order_type: OrderType
+        :param operation: str
+        :param amount: int
+        :param price: int
+        :return:
+        """
+        agent : Agent = Entity.get_entity(firm_gid)
+        agent.do_accounting(order_type, operation, amount, price, self.CommodityID)
 
     def add_named_buy(self, agent, name, order):
         """
@@ -635,15 +726,9 @@ class Market(agent_based_macro.entity.Entity):
         name = 'buy_' + name
         id_existing = agent.NamedOrders.get(name, None)
         if id_existing is not None:
-            self.remove_buy(agent, id_existing)
+            self.remove_order(id_existing)
         self.add_buy(order)
         agent.NamedOrders[name] = order.OrderID
-
-    def remove_buy(self, agent, order_id):
-        order = self.BuyList.remove_order(order_id)
-        if order is not None:
-            value = order.Price * order.Amount
-            agent.change_reserves(-value, ReserveType.ORDERS)
 
     def add_named_sell(self, agent, name, order):
         """
@@ -656,16 +741,11 @@ class Market(agent_based_macro.entity.Entity):
         name = 'sel_' + name
         id_existing = agent.NamedOrders.get(name, None)
         if id_existing is not None:
-            self.remove_sell(agent, id_existing)
+            self.remove_order(id_existing)
         self.add_sell(order)
         agent.NamedOrders[name] = order.OrderID
 
-    def remove_sell(self, agent, order_id):
-        order = self.SellList.remove_order(order_id)
-        if order is not None:
-            agent.Inventory[self.CommodityID].change_reserves(-order.Amount)
-
-    def add_buy(self, buyorder):
+    def add_buy_deprecated(self, buyorder):
         """
         Add a buy order.
 
@@ -680,6 +760,7 @@ class Market(agent_based_macro.entity.Entity):
         :param buyorder:
         :return:
         """
+        raise DeprecationWarning('about to be deleted')
         buyer = agent_based_macro.entity.Entity.get_entity(buyorder.FirmGID)
         buyer.change_reserves(buyorder.Amount * buyorder.Price, ReserveType.ORDERS)
         # If the buy price is less than the ask, we insert into BuyList
@@ -716,7 +797,7 @@ class Market(agent_based_macro.entity.Entity):
                     # Order has been cleared out, quit processing.
                     return
 
-    def add_sell(self, sellorder):
+    def add_sell_deprecated(self, sellorder):
         """
         Add a sell order.
 
@@ -733,6 +814,7 @@ class Market(agent_based_macro.entity.Entity):
         """
         # Note: I have essentially just mirrored code, which is probably bad, but at least it is
         # easy to follow.
+        raise DeprecationWarning('about to be deleted')
         seller = agent_based_macro.entity.Entity.get_entity(sellorder.FirmGID)
         seller.Inventory[self.CommodityID].change_reserves(sellorder.Amount)
 
@@ -1001,6 +1083,7 @@ class BaseSimulation(simulation.Simulation):
         :param action: Action
         :return:
         """
+        # Switch to match for Python 3.10
         if action.args[0] == 'PayWages':
             # We assume that there is only a single aggregated Household to get all wages.
             household_id = self.Households[agent.LocationID]
@@ -1011,5 +1094,33 @@ class BaseSimulation(simulation.Simulation):
                 amount = int(action.args[1])
             agent.spend_money(amount=amount)
             household.receive_wages(amount=amount)
+        elif action.args[0] == 'ProductionLabour':
+            commodity = action.args[1]
+            num_workers = action.args[2]
+            payment = action.args[3]
+            self.action_production_labour(agent, commodity, num_workers, payment)
         else:
             raise ValueError(f'Unknown Action arguments: {action.args}')
+
+    def action_production_labour(self, agent, commodity, num_workers, payment):
+        """
+        Note: can either pass the commodity_id, or the name.
+
+        Right now, production depends upon a productivity parameter that is location-based.
+        Since we need to go into other entities to get the productivity, the simulation handles it.
+        Once production functions get complex, the simulation will call back a production function
+        within the Agent itself, just filling in missing data.
+
+        :param agent: Agent
+        :param commodity: int
+        :param num_workers: int
+        :param payment: int
+        :return:
+        """
+        if type(commodity) is str:
+            commodity_id = self.get_commodity_by_name('Fud')
+        else:
+            commodity_id = commodity
+        loc = agent_based_macro.entity.Entity.get_entity(agent.LocationID)
+        production = num_workers * loc.ProductivityDict[commodity_id]
+        agent.Inventory[commodity_id].add_inventory(production, payment)
