@@ -543,6 +543,21 @@ class JobGuarantee(Agent):
         return [(payment_event, (0., 0.1))]
 
     def event_production(self, *args):
+        """
+        Do the production operation.
+
+        This method has been switched over to use Actions.
+
+        Actions triggered
+        (i) PayWages
+        (ii) ProductionLabour
+        (iii) DelayEvent - call event_set_orders() with a delay.
+
+        (Note: Will need to create a DelayEvent as an ActionEvent.
+
+        :param args:
+        :return:
+        """
         sim = agent_based_macro.entity.Entity.get_simulation()
         if self.HouseholdGID is None:
             try:
@@ -551,7 +566,6 @@ class JobGuarantee(Agent):
                 raise ValueError('Did not add the Household to the simulation.')
         # Since the HouseholdSector and central government are indestructible (I hope), this transfer will always
         # be valid. (Normally, need to validate existence of all entities.)
-
         payment = self.WorkersActual * self.JobGuaranteeWage
         self.add_action('PayWages', payment)
         # JG Production
@@ -560,9 +574,9 @@ class JobGuarantee(Agent):
         # loc = agent_based_macro.entity.Entity.get_entity(self.LocationID)
         # production = self.WorkersActual * loc.ProductivityDict[food_id]
         # self.Inventory[food_id].add_inventory(production, payment)
-        sim.queue_event_delay(self.GID, self.event_set_orders, .1)
+        self.add_action('QueueActionEventWithDelay', self.event_set_orders, .1, {'Productivity': ('Productivity', 'Fud')})
 
-    def event_set_orders(self):
+    def event_set_orders(self, *args):
         """
         Set up buy/sell orders.
 
@@ -571,8 +585,9 @@ class JobGuarantee(Agent):
         May create a simpler interface for these orders.
         :return:
         """
+        # TODO: Replace with Actions
         sim = agent_based_macro.entity.Entity.get_simulation()
-        food_id = sim.get_commodity_by_name('Fud')
+        # food_id = sim.get_commodity_by_name('Fud')
         location = agent_based_macro.entity.Entity.get_entity(self.LocationID)
         market = sim.get_market(self.LocationID, food_id)
         production_price = self.JobGuaranteeWage / location.ProductivityDict[food_id]
@@ -651,7 +666,7 @@ class HouseholdSector(Agent):
                 market.add_named_buy(agent=self, name='DailyBid', order=order)
         # Then add an event for a market order
         sim.queue_event_delay(self.GID, self.event_market_order, .6)
-        # Need to reset daily Earnings. Could be done as a seperate event, but will need a time series
+        # Need to reset daily Earnings. Could be done as a separate event, but will need a time series
         # object.
         self.DailyEarnings = 0
 
@@ -1066,7 +1081,18 @@ class BaseSimulation(simulation.Simulation):
         cgov.receive_money(amount)
 
     def get_action_data(self, agent, *args):
-        raise NotImplementedError('need GetActionData')
+        """
+        Get requested data.
+        :param agent: Agent
+        :param args:
+        :return:
+        """
+        if args[0] == 'Productivity':
+            # Use the agent's location
+            loc_id = agent.LocationID
+            loc = agent_based_macro.entity.Entity.get_entity(agent.LocationID)
+
+        raise ValueError(f'Unhandled Data Request: {args}')
 
     def process_action(self, agent, action):
         """

@@ -68,6 +68,18 @@ class Entity(object):
                 self.ActionQueue.append(ActionCallback(args[1]))
             else:
                 self.ActionQueue.append(ActionCallback(args[1], *args[2:]))
+        elif args[0] == 'QueueEventWithDelay':
+            self.ActionQueue.append(ActionQueueEventWithDelay(args[1], args[2], args[3:]))
+        elif args[0] == 'QueueActionEventWithDelay':
+            # Create an ActionEVent that is delayed.
+            if len(args) == 3:
+                call_back, delay = args[1:]
+                input_data_dict = {}
+            else:
+                call_back = args[1]
+                delay = args[2]
+                input_data_dict = args[3]
+            self.ActionQueue.append(ActionQueueActionEventWithDelay(call_back, delay, input_data_dict))
         else:
             # Generic Action to be handled by the Simulation subclass
             self.ActionQueue.append(Action(*args))
@@ -136,6 +148,24 @@ class Action(object):
     def __init__(self, *args):
         self.args = args
 
+    def do_action(self, sim, agent):
+        """
+        A method that may be overridden by subclasses to implement actions.
+
+        If not overridden, the Simulation class has to have a handler for the Action.args.
+
+        For simpler simulations, it may be easier to have the Simulation deal with the
+        action implementation. However, as the number of Action types rises, pushing the
+        code to subclasses of Action will be more modular. It will also allow users to
+        more easily hook modifications into existing classes, since they just create
+        a new Action and handler, and do not need to touch the core classes.
+
+        :param sim: Simulation
+        :param agent: Agent
+        :return:
+        """
+        raise NotImplementedError('do_action() not implemented in this class')
+
 
 class ActionDataRequest(Action):
     """
@@ -154,8 +184,19 @@ class ActionCallback(Action):
         super().__init__(*args)
         self.Callback = callback
 
+    def do_action(self, sim, agent):
+        """
+        Call the associated callback.
 
-class ActionDelayEvent(Action):
+        parameters = <callback>(agent, *self.args)
+        :param sim:
+        :param agent:
+        :return:
+        """
+        self.Callback(agent, *self.args)
+
+
+class ActionQueueEventWithDelay(Action):
     """
     Put an Event with a delay into the simulation event queue.
     """
@@ -164,3 +205,34 @@ class ActionDelayEvent(Action):
         self.callback = callback
         self.delay = delay
         self.args = args
+
+    def do_action(self, sim, agent):
+        """
+        Call the Simulation queue_event_delay()
+
+        :param sim: Simulation
+        :param agent: Agent
+        :return:
+        """
+        sim.queue_event_delay(agent.GID, self.callback, self.delay, *self.args)
+
+class ActionQueueActionEventWithDelay(Action):
+    """
+    Put an ActionEvent with a delay into the simulation event queue.
+    """
+    def __init__(self, callback, delay, data_dict, *args):
+        super().__init__(*args)
+        self.callback = callback
+        self.delay = delay
+        self.data_dict = data_dict
+        self.args = args
+
+    def do_action(self, sim, agent):
+        """
+        Call the Simulation queue_event_delay()
+
+        :param sim: Simulation
+        :param agent: Agent
+        :return:
+        """
+        sim.queue_action_event_delay(agent.GID, self.callback, self.delay, self.data_dict)

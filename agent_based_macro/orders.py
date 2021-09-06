@@ -71,6 +71,7 @@ class BaseOrder(ABC):
         self.Amount = int(amount)
         self.OrderID = GLastOrderID
         self.FirmGID = firm_gid
+        self.KeepInQueue = True
         GOrderDict[GLastOrderID] = self
         GLastOrderID -= 1
 
@@ -166,14 +167,17 @@ class MarketBase(object):
         # Otherwise, we transact until either the buy order is completely filled, or
         # the ask has risen past the new order's bid
         while True:
-            if len(self.SellList) == 0:
-                # No sellers, so automatically add to BuyList
-                self.BuyList.insert_order(buy_order)
-                return
-            ask = self.SellList[0].Price
-            if buy_order.Price < ask:
+            try:
+                ask = self.SellList[0].Price
+            except IndexError:
+                ask = None
+            if (ask is None) or (buy_order.Price < ask):
                 # Bid price is below ask, so add to BuyList
-                self.BuyList.insert_order(buy_order)
+                if buy_order.KeepInQueue:
+                    self.BuyList.insert_order(buy_order)
+                else:
+                    self.do_accounting(buy_order.FirmGID, OrderType.BUY, 'remove', buy_order.Amount,
+                                       buy_order.Price)
                 return
             else:
                 # Transaction!
@@ -216,14 +220,17 @@ class MarketBase(object):
         # Otherwise, we transact until either the buy order is completely filled, or
         # the ask has risen past the new order's bid
         while True:
-            if len(self.BuyList) == 0:
-                # No sellers, so automatically add to SellList
-                self.SellList.insert_order(sell_order)
-                return
-            bid = self.BuyList[0].Price
-            if sell_order.Price > bid:
-                # Bid price is below selling price, so add to SellList
-                self.SellList.insert_order(sell_order)
+            try:
+                bid = self.BuyList[0].Price
+            except IndexError:
+                bid = None
+            if (bid is None) or (sell_order.Price > bid):
+                # No transaction
+                if sell_order.KeepInQueue:
+                    self.SellList.insert_order(sell_order)
+                else:
+                    self.do_accounting(sell_order.FirmGID, OrderType.SELL, 'remove', sell_order.Amount,
+                                       sell_order.Price)
                 return
             else:
                 # Transaction!

@@ -182,6 +182,61 @@ class TestMarketBase(TestCase):
         # Amount is reduced by fill amount
         self.assertEqual(5, obj.BuyList[0].Amount)
 
+    def test_not_KeepInQueue(self):
+        obj = MockMarket()
+        order = orders.BuyOrder(price=10, amount=10, firm_gid=1)
+        obj.add_buy(order)
+        obj.Accounting = []
+        order2 = orders.SellOrder(price=10, amount=15, firm_gid=2)
+        order2.KeepInQueue = False
+        obj.add_sell(order2)
+        self.assertEqual(4, len(obj.Accounting))
+        obj.Accounting.sort()
+        self.assertEqual(obj.Accounting[0], (1, OrderType.BUY, 'fill', 10, 10))
+        self.assertEqual(obj.Accounting[1], (2, OrderType.SELL, 'add', 15, 10))
+        self.assertEqual(obj.Accounting[2], (2, OrderType.SELL, 'fill', 10, 10))
+        self.assertEqual(obj.Accounting[3], (2, OrderType.SELL, 'remove', 5, 10))
+
+    def test_not_KeepInQueue_buy(self):
+        obj = MockMarket()
+        order = orders.SellOrder(price=10, amount=10, firm_gid=1)
+        obj.add_sell(order)
+        obj.Accounting = []
+        order2 = orders.BuyOrder(price=10, amount=15, firm_gid=2)
+        order2.KeepInQueue = False
+        obj.add_buy(order2)
+        self.assertEqual(4, len(obj.Accounting))
+        obj.Accounting.sort()
+        self.assertEqual(obj.Accounting[0], (1, OrderType.SELL, 'fill', 10, 10))
+        self.assertEqual(obj.Accounting[1], (2, OrderType.BUY, 'add', 15, 10))
+        self.assertEqual(obj.Accounting[2], (2, OrderType.BUY, 'fill', 10, 10))
+        self.assertEqual(obj.Accounting[3], (2, OrderType.BUY, 'remove', 5, 10))
+
+    def test_remove(self):
+        obj = MockMarket()
+        # Nothing should happen...
+        # Order ID's are negative, so we are asking to remove a non-existent order. This
+        # should be fine. Nothing to test, since nothing is supposed to happen.
+        obj.remove_order(1)
+        order = orders.BuyOrder(price=10, amount=15, firm_gid=1)
+        obj.add_buy(order)
+        self.assertEqual(1, len(obj.BuyList))
+        obj.Accounting = []
+        obj.remove_order(order.OrderID)
+        self.assertEqual(0, len(obj.BuyList))
+        self.assertEqual(0, len(obj.SellList))
+        self.assertEqual([(1, OrderType.BUY, 'remove', 15, 10)], obj.Accounting)
+
+    def test_remove_sell(self):
+        obj = MockMarket()
+        order2 = orders.SellOrder(price=10, amount=15, firm_gid=2)
+        obj.add_sell(order2)
+        self.assertEqual(1, len(obj.SellList))
+        obj.Accounting = []
+        obj.remove_order(order2.OrderID)
+        self.assertEqual(0, len(obj.SellList))
+        self.assertEqual([(2, OrderType.SELL, 'remove', 15, 10)], obj.Accounting)
+
     def test_order_mismatch(self):
         obj = MockMarket()
         self.assertRaises(ValueError, obj.add_sell, orders.BuyOrder(1, 1, 1))

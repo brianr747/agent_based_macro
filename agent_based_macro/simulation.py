@@ -44,7 +44,7 @@ from abc import ABC, abstractmethod
 import agent_based_macro.entity
 import agent_based_macro.utils as utils
 from agent_based_macro.entity import EntityDoesNotExist, EntityDead, Entity, reset_entities, ActionDataRequest, \
-    ActionCallback, ActionDelayEvent
+    ActionCallback, ActionQueueEventWithDelay
 
 GSimulation = None
 
@@ -124,7 +124,7 @@ class ActionEvent(Event):
         :param args:
         :return:
         """
-        self.DataRequests.append((name, args))
+        self.DataRequests.append((name, *args))
 
 
 class Client(object):
@@ -238,6 +238,12 @@ class Simulation(ABC, Entity):
         event = Event(gid, action, self.Time + delay, None, *args)
         queue_event(event)
 
+    def queue_action_event_delay(self, gid, callback, delay, data_dict):
+        event = ActionEvent(gid, callback, self.Time + delay, repeat=None)
+        for k,v in data_dict.items():
+            event.add_data_request(k, v)
+        queue_event(event)
+
     def get_entity(self, gid):
         """
         Convenience function for callbacks that have the handle to the simulation
@@ -321,14 +327,14 @@ class Simulation(ABC, Entity):
                 # Enforce a limit in case an infinite recursion is hit
                 raise ValueError(f'Entity spawned more than {self.MaxActionLimit} Actions!')
             action = ent.ActionQueue.pop(0)
-            if isinstance(action, ActionDataRequest):
-                ent.ActionData[action.Name] = self.get_action_data(ent, action.args)
-            elif isinstance(action, ActionCallback):
-                action.Callback(action.args)
-            elif isinstance(action, ActionDelayEvent):
-                self.queue_event_delay(ent.GID, action.callback, action.delay, *action.args)
-            else:
-                self.process_action(ent, action)
+            try:
+                action.do_action(self, ent)
+            except NotImplementedError:
+                # Simulation-level action handlers for data, or whatever else.
+                if isinstance(action, ActionDataRequest):
+                    ent.ActionData[action.Name] = self.get_action_data(ent, action.args)
+                else:
+                    self.process_action(ent, action)
 
     @abstractmethod
     def process_action(self, agent, action):
