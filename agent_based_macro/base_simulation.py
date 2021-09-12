@@ -570,11 +570,13 @@ class JobGuarantee(Agent):
         self.add_action('PayWages', payment)
         # JG Production
         self.add_action('ProductionLabour', 'Fud', self.WorkersActual, payment)
-        # food_id = sim.get_commodity_by_name('Fud')
-        # loc = agent_based_macro.entity.Entity.get_entity(self.LocationID)
-        # production = self.WorkersActual * loc.ProductivityDict[food_id]
-        # self.Inventory[food_id].add_inventory(production, payment)
-        self.add_action('QueueActionEventWithDelay', self.event_set_orders, .1, {'Productivity': ('Productivity', 'Fud')})
+        # The data needed by event_set_orders: the productivity of Fud production, as well as the ID of Fud.
+        # Note: Should save the FoodID in the class, since needed every time.
+        data_queries = {
+            'Productivity': ('Productivity', 'Fud'),
+            'FudID': ('CommodityID', 'Fud')
+        }
+        self.add_action('QueueActionEventWithDelay', self.event_set_orders, .1, data_queries)
 
     def event_set_orders(self, *args):
         """
@@ -582,22 +584,20 @@ class JobGuarantee(Agent):
 
         Keep it as simple as possible, to allow the loop to close.
 
-        May create a simpler interface for these orders.
+        Currently, sets up two named orders
+        (1) 'floor': A floor price bid for 300 units.
+        (2) 'production': Sale of production at 110% of production cost.
         :return:
         """
-        # TODO: Replace with Actions
-        sim = agent_based_macro.entity.Entity.get_simulation()
-        # food_id = sim.get_commodity_by_name('Fud')
-        location = agent_based_macro.entity.Entity.get_entity(self.LocationID)
-        market = sim.get_market(self.LocationID, food_id)
-        production_price = self.JobGuaranteeWage / location.ProductivityDict[food_id]
-        # Create a floor price
-        buyorder = BuyOrder(production_price * .95, 300, self.GID)
-        market.add_named_buy(agent=self, name='floor', order=buyorder)
-        # Sell production
+        food_id = self.ActionData['FudID']
+        productivity = self.ActionData['Productivity']
+        production_price = self.JobGuaranteeWage / productivity
+        # Create a floor
+        price = production_price * .95
+        amount = 300
+        self.add_action('AddNamedBuy', 'floor', food_id, price, amount)
         amount = self.Inventory[food_id].Amount - self.Inventory[food_id].Reserved
-        sellorder = SellOrder(production_price * 1.1, amount, self.GID)
-        market.add_named_sell(agent=self, name='production', order=sellorder)
+        self.add_action('AddNamedSell', 'production', food_id, production_price * 1.1, amount)
 
 
 class HouseholdSector(Agent):
@@ -1088,10 +1088,18 @@ class BaseSimulation(simulation.Simulation):
         :return:
         """
         if args[0] == 'Productivity':
+            # FORMAT: 'Productivity', <commodity name or ID> -> productivity factor for agent's location.
             # Use the agent's location
             loc_id = agent.LocationID
             loc = agent_based_macro.entity.Entity.get_entity(agent.LocationID)
-
+            if type(args[1]) is str:
+                commodity_id = self.get_commodity_by_name(args[1])
+            else:
+                commodity_id = args[1]
+            return loc.ProductivityDict[commodity_id]
+        if args[0] == 'CommodityID':
+            # Format: 'CommodityID', <commodity_name> -> commodity ID.
+            return self.get_commodity_by_name(args[1])
         raise ValueError(f'Unhandled Data Request: {args}')
 
     def process_action(self, agent, action):
@@ -1125,6 +1133,22 @@ class BaseSimulation(simulation.Simulation):
             num_workers = action.args[2]
             payment = action.args[3]
             self.action_production_labour(agent, commodity, num_workers, payment)
+        elif action.args[0] == 'AddNamedBuy':
+            name = action.args[1]
+            commodity_id = action.args[2]
+            price = action.args[3]
+            amount = action.args[4]
+            market = self.get_market(agent.LocationID, commodity_id)
+            order = BuyOrder(price, amount, agent.GID)
+            market.add_named_buy(agent, name, order)
+        elif action.args[0] == 'AddNamedSell':
+            name = action.args[1]
+            commodity_id = action.args[2]
+            price = action.args[3]
+            amount = action.args[4]
+            market = self.get_market(agent.LocationID, commodity_id)
+            order = SellOrder(price, amount, agent.GID)
+            market.add_named_sell(agent, name, order)
         else:
             raise ValueError(f'Unknown Action arguments: {action.args}')
 

@@ -316,7 +316,7 @@ class Simulation(ABC, Entity):
         # Actions requested by the Entity
         ent.ActionQueue = []
         for name, data_args in action_event.DataRequests:
-            ent.ActionData[name] = self.get_action_data(ent, data_args)
+            ent.ActionData[name] = self.get_action_data(ent, *data_args)
         # Run the callback
         action_event.Callback(action_event.args)
         # Then, do the requested actions.
