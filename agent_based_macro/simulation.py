@@ -198,6 +198,7 @@ class Simulation(ABC, Entity):
         GSimulation = self
         # How many Actions can be processed?
         self.MaxActionLimit = 100
+        self.TimeSeriesDict = {}
 
     def add_entity(self, entity):
         """
@@ -413,3 +414,45 @@ class Simulation(ABC, Entity):
             msg.client_message(self.ClientDict[client_id])
         else:
             msg.client_message(self.ClientDict[client_id], *msg.args)
+
+    def register_time_series(self, name, freq=1., fill=None):
+        """
+        Add a new time series. Throws an error if series with same name exists.
+        :param fill: float
+        :param freq: float
+        :param name: str
+        :return:
+        """
+        if name in self.TimeSeriesDict:
+            raise ValueError(f'Time series with name "{name}" is already registered')
+        self.TimeSeriesDict[name] = utils.TimeSeries(freq=freq, fill=fill)
+
+    def time_series_add(self, name, value):
+        ts : utils.TimeSeries = self.TimeSeriesDict[name]
+        ts.add(value, self.Time)
+
+    def time_series_set(self, name, value):
+        ts : utils.TimeSeries = self.TimeSeriesDict[name]
+        ts.set(value, self.Time)
+
+    def dump_time_series(self, fname):
+        """
+        Dump all time series into a file. This is a "tier 0" implementation
+        :param fname: str
+        :return:
+        """
+        ser_names = list(self.TimeSeriesDict.keys())
+        ser_names.sort()
+        f = open(fname, 'w')
+        for name in ser_names:
+            ts : utils.TimeSeries = self.TimeSeriesDict[name]
+            finish = ts.get_index_and_grow(self.Time, grow=True)
+            increment = 1./ts.Frequency
+            f.write(f'series\t{name}\n')
+            for i in range(0, finish+1):
+                val = ts.Data[i]
+                if val is None:
+                    f.write(f'{increment*i}\t{val}\n')
+                else:
+                    f.write(f'{increment*i}\t{val:6g}\n')
+        f.close()

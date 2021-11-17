@@ -218,6 +218,26 @@ class Agent(agent_based_macro.entity.Entity):
         self.NamedOrders = {}
         # We allow central government entities to run negative money balances, because MMT
         self.IsCentralGovernment = False
+        self.SeriesBase = f'{name}@{location_id}'
+        self.RegisteredSeries = dict()
+
+    def register_series(self, series_name):
+        """
+        Register a series associated with the agent. The agent's SeriesBase string is prepended
+        :param series_name: str
+        :return:
+        """
+        full_name = f'{self.SeriesBase}|{series_name}'
+        simulation.get_simulation().register_time_series(full_name)
+        self.RegisteredSeries[series_name] = full_name
+
+    def time_series_set(self, name, value):
+        try:
+            full_name = self.RegisteredSeries[name]
+        except KeyError:
+            # Not registered, do nothing
+            return
+        simulation.get_simulation().time_series_set(full_name, value)
 
     def receive_money(self, amount):
         """
@@ -558,12 +578,6 @@ class JobGuarantee(Agent):
         :param args:
         :return:
         """
-        sim = agent_based_macro.entity.Entity.get_simulation()
-        if self.HouseholdGID is None:
-            try:
-                self.HouseholdGID = sim.Households[self.LocationID]
-            except KeyError:
-                raise ValueError('Did not add the Household to the simulation.')
         # Since the HouseholdSector and central government are indestructible (I hope), this transfer will always
         # be valid. (Normally, need to validate existence of all entities.)
         payment = self.WorkersActual * self.JobGuaranteeWage
@@ -584,9 +598,10 @@ class JobGuarantee(Agent):
 
         Keep it as simple as possible, to allow the loop to close.
 
-        Currently, sets up two named orders
+        Currently, sets up three named orders
         (1) 'floor': A floor price bid for 300 units.
-        (2) 'production': Sale of production at 110% of production cost.
+        (2) 'production': Sale of most production at 110% of production cost.
+        (3) 'emergency': sale of remainder at 150% of production cost.
         :return:
         """
         food_id = self.ActionData['FudID']
@@ -596,8 +611,14 @@ class JobGuarantee(Agent):
         price = production_price * .95
         amount = 300
         self.add_action('AddNamedBuy', 'floor', food_id, price, amount)
-        amount = self.Inventory[food_id].Amount - self.Inventory[food_id].Reserved
-        self.add_action('AddNamedSell', 'production', food_id, production_price * 1.1, amount)
+        available = self.Inventory[food_id].Amount - self.Inventory[food_id].Reserved
+        production_amount = int(available*0.7)
+        self.add_action('AddNamedSell', 'production', food_id, production_price * 1.1, production_amount)
+        self.time_series_set('production', production_price * 1.1 * production_amount)
+        remainder = available - production_amount
+        self.add_action('AddNamedSell', 'emergency', food_id, production_price * 1.5,remainder)
+        self.time_series_set('emergency', production_price * 1.5 * remainder)
+
 
 
 class HouseholdSector(Agent):
@@ -643,6 +664,9 @@ class HouseholdSector(Agent):
         daily_spend = 0.7 * self.DailyEarnings + 0.01 * self.Money
         # Increase TargetMoney by the implied daily savings - possibly negative
         self.TargetMoney += (self.DailyEarnings - daily_spend)
+        self.time_series_set('DailyEarnings', self.DailyEarnings)
+        self.time_series_set('TargetMoney', self.TargetMoney)
+        self.time_series_set('Money', self.Money)
         # Put in a order for 100% of available spending at a fixed offset below the ask price.
         # This will cancel any existing order, which will free up cash if the previous day's order
         # was not filled.
@@ -661,6 +685,7 @@ class HouseholdSector(Agent):
             #     a bid beyond daily spending.
             targ_spend = min(self.Money - self.TargetMoney, 1.3 * daily_spend)
             amount = math.floor(targ_spend / bid_price)
+            self.time_series_set('DailyBid', amount*bid_price)
             if amount > 0:
                 order = BuyOrder(bid_price, amount, self.GID)
                 market.add_named_buy(agent=self, name='DailyBid', order=order)
@@ -695,6 +720,7 @@ class HouseholdSector(Agent):
         if amount < 1:
             return
         order = BuyOrder(price, amount, self.GID)
+        self.time_series_set('MarketOrder', price*amount)
         market.add_named_buy(agent=self, name='"MarketOrder"', order=order)
 
 
@@ -885,12 +911,16 @@ class Market(agent_based_macro.entity.Entity, MarketBase):
         info['CommodityID'] = self.CommodityID
         if len(self.BuyList) > 0:
             info['BidPrice'] = self.BuyList[0].Price
+            info['BidSize'] = self.BuyList[0].Amount
         else:
             info['BidPrice'] = None
+            info['BidSize'] = None
         if len(self.SellList) > 0:
             info['AskPrice'] = self.SellList[0].Price
+            info['AskSize'] = self.SellList[0].Amount
         else:
             info['AskPrice'] = None
+            info['AskSize'] = None
         info['LastPrice'] = self.LastPrice
         info['LastTime'] = self.LastTime
         return info
@@ -1168,7 +1198,7 @@ class BaseSimulation(simulation.Simulation):
         :return:
         """
         if type(commodity) is str:
-            commodity_id = self.get_commodity_by_name('Fud')
+            commodity_id = self.get_commodity_by_name(commodity)
         else:
             commodity_id = commodity
         loc = agent_based_macro.entity.Entity.get_entity(agent.LocationID)
