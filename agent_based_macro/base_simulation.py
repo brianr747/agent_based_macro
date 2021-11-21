@@ -101,6 +101,7 @@ class Planet(Location):
         return info
 
 
+
 class ReserveType(enum.Enum):
     NONE = 0
     ORDERS = 1
@@ -220,6 +221,12 @@ class Agent(agent_based_macro.entity.Entity):
         self.IsCentralGovernment = False
         self.SeriesBase = f'{name}@{location_id}'
         self.RegisteredSeries = dict()
+        # Worker management
+        self.IsEmployer = False
+        self.WorkersActual = 0
+        self.TargetWorkers = 0
+        self.WorkersNextPeriod = 0
+        self.Wage = 0
 
     def register_series(self, series_name):
         """
@@ -436,8 +443,60 @@ class Agent(agent_based_macro.entity.Entity):
     def get_info(self):
         return f'{self.GID}'
 
+class ProductionAgent(Agent):
+    """
+    An agent that has production capacity
+    """
+    def __init__(self, name,  money_balance=0, location_id=None):
+        super().__init__(name, money_balance=money_balance, location_id=location_id)
+        self.ProductivityMultiplier = 1.
 
-class ProducerLabour(Agent):
+    def get_productivity(self, commodity_id):
+        """
+        Get the productivity associated with a commodity.
+        For now, we have a single scalar ProductivityMultiplier for all commodities.
+        Might need to revise that if we have multiple outputs.
+
+        :param commodity_id: int
+        :return: float
+        """
+        loc = agent_based_macro.entity.Entity.get_entity(self.LocationID)
+        base_productivity = loc.ProductivityDict[commodity_id]
+        productivity = self.ProductivityMultiplier*base_productivity
+        return productivity
+
+    def get_daily_production(self, commodity_id):
+        """
+        Production function on a daily basis. Returns an int. The time between production events is the inverse
+        of this value.
+
+        Note that we need to round off production to integer values. If we want smoothly varying productivity,
+        would need to make the system more complicated. We could either have a changing production period time,
+        or track fractional produced units. The latter is more complicated in that we need to split the production
+        cost between the quantised production and the fractional overflow.
+
+        :return: int
+        """
+        productivity = self.get_productivity(commodity_id)
+
+        return int(productivity*float(self.WorkersActual))
+
+    def unit_cost(self, commodity_id):
+        """
+        Unit Cost of production (float).
+
+        If production remains linear, we could just base this on wages, but we might allow for
+        nonlinearities, so we need to calculate the daily production
+        :return: float
+        """
+        return self.get_daily_production(commodity_id) / float(self.WorkersActual * self.Wage)
+
+    def get_daily_wage_bill(self):
+        payment = self.WorkersActual * self.Wage
+        return payment
+
+
+class ProducerLabour(ProductionAgent):
     """
     A firm that produces output solely based on labour input.
 
@@ -452,50 +511,32 @@ class ProducerLabour(Agent):
         # Subclasses can override these values...
         # Penalty multiplier for firing. Fixed by law.
         self.WagePenalty = 5
-        # This is the multiplier used to determine reserve for wages. Must be greater than WagePenalty
-        self.WageMultiplier = 15
         # This is a technological limit
         self.WorkersMax = 40
         # This is set by decision routines
         self.WorkersTarget = 0
-        # What is daily wage per worker. Set by decision routines
-        self.Wage = 0
-        # How many workers are working for the day?
-        # Note that workers are paid up front
-        self.WorkersActual = 0
-        # When does wage payment/worker rollover happen (offset in interval (0.1, 1)?
-        self.DayOffset = 0.1
-        # Number of workers on the next day, determined by worker migration step
-        # Worker migration done in (0, .1) interval.
+
         self.WorkersNextDay = 0
         # Inventory manager
         self.Inventory = Inventory()
-        # Production level = float, updated during production events. Once > 1.0, add integer part to Inventory
-        self.Production = 0.0
         # Wages are not expensed, they are capitalised into inventory cost.
         # Once units are produced, balance from CapitalisedWages is transferred to InventoryCost.
         self.CapitalisedWages = 0
-        # Linear production factor
-        self.LinearProduction = 15.
-        self.Employer = True
+        self.IsEmployer = True
 
-    def daily_production(self):
-        """
-        Production function on a daily basis. Returns a float. The time between production events is the inverse
-        of this value.
-        :return: float
-        """
-        return self.LinearProduction * float(self.WorkersActual)
+    def register_events(self):
+        hiring_event = simulation.ActionEvent(self.GID, self.event_hiring, .05, 1.)
+        production_event = simulation.ActionEvent(self.GID, self.event_production, .5, 1.)
+        return [(hiring_event, (0., 0.2)),
+                (production_event, (.21, .99))]
 
-    def unit_cost(self):
-        """
-        Unit Cost of production (float).
+    def event_hiring(self, *args):
+        self.TargetWorkers = 40
+        print(self.GID, 'Actual workers', self.WorkersActual)
 
-        If production remains linear, we could just base this on wages, but we might allow for
-        nonlinearities, so we need to calculate the daily production
-        :return: float
-        """
-        return self.daily_production() / float(self.WorkersActual * self.Wage)
+    def event_production(self, *args):
+        pass
+
 
 
 class CentralGovernment(Agent):
@@ -515,7 +556,7 @@ class CentralGovernment(Agent):
         self.Money -= amount
 
 
-class JobGuarantee(Agent):
+class JobGuarantee(ProductionAgent):
     """
     Although ech planet has its own agent, transactions use the central government money account.
     """
@@ -526,7 +567,7 @@ class JobGuarantee(Agent):
         self.WorkersActual = num_workers
         self.Employer = True
         self.Inventory = Inventory()
-        self.JobGuaranteeWage = job_guarantee_wage
+        self.Wage = job_guarantee_wage
         self.IsCentralGovernment = True
         # Will find the HouseholdGID later...
         self.HouseholdGID = None
@@ -559,8 +600,67 @@ class JobGuarantee(Agent):
 
         :return: list
         """
-        payment_event = simulation.ActionEvent(self.GID, self.event_production, 0., 1.)
-        return [(payment_event, (0., 0.1))]
+        payment_event = simulation.ActionEvent(self.GID, self.event_production, 0.02, 1.)
+        labour_event = simulation.ActionEvent(self.GID, self.event_labour_market, 0., 1.)
+        return [(payment_event, (0.04, 0.1)),
+                (labour_event, (0., .038)),]
+
+    def event_labour_market(self, *args):
+        """
+        Labour market simulation for a planet. Tie to the Job Guarantee for simplicity, but it handles all
+        movements.
+
+        There are two strategies that could be used: aggregated, versus a per-household search model.
+
+        The search model is actually simple: create a number of worker entities, and cycle through them. They will
+        drift at random towards better jobs. The problem with that it is inherently going to be random, and it is
+        easier to test a deterministic one. Instead, I will start with a deterministic drift algorithm. This should
+        be more efficient if there are a very large number of "worker units."
+
+        Note: for simplicity, do all processing inside this function, instead of using Actions.
+        """
+        if len(self.EmployerDict) == 0:
+            self.find_employers()
+        # Do in two passes.
+        # 1) Handle firing, if any. Find employers looking for workers.
+        # 2) If there are hiring employers, and there are workers in the Job Guarantee, then some workers will
+        #    drift to the employers.
+        # Need to add the possibility of workers jumping from one employer to another. Since all wages are equal for
+        # now, can defer adding that.
+        employers_hiring = []
+        total_hires = 0
+        # Firing pass. Workers go to Job Guarantee immediately.
+        employer: Agent
+        for employer_id, employer in self.EmployerDict.items():
+            hires = employer.TargetWorkers -  employer.WorkersActual
+            # If hires = 0, no changes.
+            if hires < 0:
+                if employer.TargetWorkers < 0:
+                    raise ValueError('Cannot have negative workers')
+                # You're fired! Since hires is negative, the JobGuarantee.WorkersActual is increasing.
+                self.WorkersActual -= hires
+                employer.WorkersActual = employer.TargetWorkers
+            elif hires > 0:
+                employers_hiring.append(employer_id)
+                total_hires += hires
+        # Pass two: if there are workers in the JobGuarantee, they go to private workers.
+        # TODO: Add wage logic. Right now, since wages are fixed, do not need to take wages into account.
+        # To slow down dynamics slightly, assume that only 1/3 of the JobGuarantee workers can be hired in a day,
+        # rounded up.
+        actual_hires = min(total_hires, math.ceil(float(self.WorkersActual)/3.))
+        if actual_hires == 0:
+            return
+        # Since not every employer can get their desired workers, be unfair and give rounded up portions to
+        # employers in order. This means that employers at the end of the list will miss out if there are fractions.
+        assignment_fraction = float(actual_hires)/float(total_hires)
+        for employer_id in employers_hiring:
+            employer = self.EmployerDict[employer_id]
+            num_hired = math.ceil(assignment_fraction*(employer.TargetWorkers-employer.WorkersActual))
+            # No rounding above the number of workers to be hired
+            num_hired = min(num_hired, actual_hires)
+            actual_hires -= num_hired
+            employer.WorkersActual += num_hired
+            self.WorkersActual -= num_hired
 
     def event_production(self, *args):
         """
@@ -580,7 +680,7 @@ class JobGuarantee(Agent):
         """
         # Since the HouseholdSector and central government are indestructible (I hope), this transfer will always
         # be valid. (Normally, need to validate existence of all entities.)
-        payment = self.WorkersActual * self.JobGuaranteeWage
+        payment = self.get_daily_wage_bill()
         self.add_action('PayWages', payment)
         # JG Production
         self.add_action('ProductionLabour', 'Fud', self.WorkersActual, payment)
@@ -606,7 +706,7 @@ class JobGuarantee(Agent):
         """
         food_id = self.ActionData['FudID']
         productivity = self.ActionData['Productivity']
-        production_price = self.JobGuaranteeWage / productivity
+        production_price = self.Wage / productivity
         # Create a floor
         price = production_price * .95
         amount = 300
@@ -838,61 +938,6 @@ class Market(agent_based_macro.entity.Entity, MarketBase):
                     # Order has been cleared out, quit processing.
                     return
 
-    def add_sell_deprecated(self, sellorder):
-        """
-        Add a sell order.
-
-        Note: if for some reason the new order hits a sell order from the same firm (?),
-        the firm transacts against itself.
-
-        Since the buy will release reserved inventory, it does have the effect of adding to free inventory.
-
-        This should be changed to just releasing inventory, as transacting against itself allows an Agent to
-        play games with inventory costs, and it generates taxable income.
-
-        :param sellorder: SellOrder
-        :return:
-        """
-        # Note: I have essentially just mirrored code, which is probably bad, but at least it is
-        # easy to follow.
-        raise DeprecationWarning('about to be deleted')
-        seller = agent_based_macro.entity.Entity.get_entity(sellorder.FirmGID)
-        seller.Inventory[self.CommodityID].change_reserves(sellorder.Amount)
-
-        # If the sell price is greater than the bid, we insert into SellList
-        # Otherwise, we transact until either the order is completely filled, or
-        # the bid drops the new order's ask
-        while True:
-            if len(self.BuyList) == 0:
-                # No sellers, so automatically add to BuyList
-                self.SellList.insert_order(sellorder)
-                return
-            bid = self.BuyList[0].Price
-            if sellorder.Price > bid:
-                self.SellList.insert_order(sellorder)
-                return
-            else:
-                # Transaction!
-                self.LastPrice = bid
-                self.LastTime = simulation.get_simulation().Time
-                amount = min(self.BuyList[0].Amount, sellorder.Amount)
-                buyer = agent_based_macro.entity.Entity.get_entity(self.BuyList[0].FirmGID)
-
-                payment = amount * bid
-                #
-                buyer.spend_money(payment, from_reserve=ReserveType.ORDERS)
-                seller.receive_money(payment)
-                buyer.Inventory[self.CommodityID].add_inventory(amount, payment)
-                cogs = seller.Inventory[self.CommodityID].remove_inventory(amount, from_reserve=True)
-                # TODO: Register loss from COGS
-                # Clear out empty orders as needed
-                self.BuyList[0].Amount -= amount
-                sellorder.Amount -= amount
-                self.BuyList.check_empty()
-                if sellorder.Amount == 0:
-                    # Order has been completely filled, quit processing
-                    return
-
     def get_bid(self):
         if len(self.BuyList) > 0:
             return self.BuyList[0].Price
@@ -1119,14 +1164,11 @@ class BaseSimulation(simulation.Simulation):
         """
         if args[0] == 'Productivity':
             # FORMAT: 'Productivity', <commodity name or ID> -> productivity factor for agent's location.
-            # Use the agent's location
-            loc_id = agent.LocationID
-            loc = agent_based_macro.entity.Entity.get_entity(agent.LocationID)
             if type(args[1]) is str:
                 commodity_id = self.get_commodity_by_name(args[1])
             else:
                 commodity_id = args[1]
-            return loc.ProductivityDict[commodity_id]
+            return agent.get_productivity(commodity_id)
         if args[0] == 'CommodityID':
             # Format: 'CommodityID', <commodity_name> -> commodity ID.
             return self.get_commodity_by_name(args[1])
@@ -1201,6 +1243,5 @@ class BaseSimulation(simulation.Simulation):
             commodity_id = self.get_commodity_by_name(commodity)
         else:
             commodity_id = commodity
-        loc = agent_based_macro.entity.Entity.get_entity(agent.LocationID)
-        production = num_workers * loc.ProductivityDict[commodity_id]
+        production = agent.get_daily_production(commodity_id)
         agent.Inventory[commodity_id].add_inventory(production, payment)
