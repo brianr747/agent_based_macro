@@ -496,49 +496,6 @@ class ProductionAgent(Agent):
         return payment
 
 
-class ProducerLabour(ProductionAgent):
-    """
-    A firm that produces output solely based on labour input.
-
-    Eventually will have producers with commodity inputs. May migrate code to a base class
-
-    Note: I started this class, but it's not been used, and the code may be out of date.
-    """
-
-    def __init__(self, name, money_balance, location_id, commodity_id):
-        super().__init__(name, money_balance, location_id)
-        self.OutputID = commodity_id
-        # Subclasses can override these values...
-        # Penalty multiplier for firing. Fixed by law.
-        self.WagePenalty = 5
-        # This is a technological limit
-        self.WorkersMax = 40
-        # This is set by decision routines
-        self.WorkersTarget = 0
-
-        self.WorkersNextDay = 0
-        # Inventory manager
-        self.Inventory = Inventory()
-        # Wages are not expensed, they are capitalised into inventory cost.
-        # Once units are produced, balance from CapitalisedWages is transferred to InventoryCost.
-        self.CapitalisedWages = 0
-        self.IsEmployer = True
-
-    def register_events(self):
-        hiring_event = simulation.ActionEvent(self.GID, self.event_hiring, .05, 1.)
-        production_event = simulation.ActionEvent(self.GID, self.event_production, .5, 1.)
-        return [(hiring_event, (0., 0.2)),
-                (production_event, (.21, .99))]
-
-    def event_hiring(self, *args):
-        self.TargetWorkers = 40
-        print(self.GID, 'Actual workers', self.WorkersActual)
-
-    def event_production(self, *args):
-        pass
-
-
-
 class CentralGovernment(Agent):
     def __init__(self):
         super().__init__(name='CentralGovernment', money_balance=0)
@@ -629,9 +586,12 @@ class JobGuarantee(ProductionAgent):
         # now, can defer adding that.
         employers_hiring = []
         total_hires = 0
+        # Calculate the total population - should not be changing!
+        total_population = self.WorkersActual
         # Firing pass. Workers go to Job Guarantee immediately.
         employer: Agent
         for employer_id, employer in self.EmployerDict.items():
+            total_population += employer.WorkersActual
             hires = employer.TargetWorkers -  employer.WorkersActual
             # If hires = 0, no changes.
             if hires < 0:
@@ -648,19 +608,21 @@ class JobGuarantee(ProductionAgent):
         # To slow down dynamics slightly, assume that only 1/3 of the JobGuarantee workers can be hired in a day,
         # rounded up.
         actual_hires = min(total_hires, math.ceil(float(self.WorkersActual)/3.))
-        if actual_hires == 0:
-            return
-        # Since not every employer can get their desired workers, be unfair and give rounded up portions to
-        # employers in order. This means that employers at the end of the list will miss out if there are fractions.
-        assignment_fraction = float(actual_hires)/float(total_hires)
-        for employer_id in employers_hiring:
-            employer = self.EmployerDict[employer_id]
-            num_hired = math.ceil(assignment_fraction*(employer.TargetWorkers-employer.WorkersActual))
-            # No rounding above the number of workers to be hired
-            num_hired = min(num_hired, actual_hires)
-            actual_hires -= num_hired
-            employer.WorkersActual += num_hired
-            self.WorkersActual -= num_hired
+        if actual_hires > 0:
+            # Since not every employer can get their desired workers, be unfair and give rounded up portions to
+            # employers in order. This means that employers at the end of the list will miss out if there are fractions.
+            assignment_fraction = float(actual_hires)/float(total_hires)
+            for employer_id in employers_hiring:
+                employer = self.EmployerDict[employer_id]
+                num_hired = math.ceil(assignment_fraction*(employer.TargetWorkers-employer.WorkersActual))
+                # No rounding above the number of workers to be hired
+                num_hired = min(num_hired, actual_hires)
+                actual_hires -= num_hired
+                employer.WorkersActual += num_hired
+                self.WorkersActual -= num_hired
+        # Calculate the unemployment rate
+        unemployment = float(self.WorkersActual)/float(total_population)
+        self.time_series_set('unemployment', unemployment)
 
     def event_production(self, *args):
         """
@@ -761,7 +723,7 @@ class HouseholdSector(Agent):
         :return:
         """
         # Hard code parameters for now
-        daily_spend = 0.7 * self.DailyEarnings + 0.01 * self.Money
+        daily_spend = int(0.7 * self.DailyEarnings + 0.01 * self.Money)
         # Increase TargetMoney by the implied daily savings - possibly negative
         self.TargetMoney += (self.DailyEarnings - daily_spend)
         self.time_series_set('DailyEarnings', self.DailyEarnings)
@@ -775,6 +737,7 @@ class HouseholdSector(Agent):
         location = agent_based_macro.entity.Entity.get_entity(self.LocationID)
         market = sim.get_market(self.LocationID, food_id)
         ask = market.get_ask()
+
         # No ask price, no bid!
         if ask is not None:
             bid_price = int(0.95 * ask)
@@ -784,6 +747,11 @@ class HouseholdSector(Agent):
             # (2) 130% of daily spend. If we spent less than the maximum in previous days, allow for
             #     a bid beyond daily spending.
             targ_spend = min(self.Money - self.TargetMoney, 1.3 * daily_spend)
+            # Need to deal with a corner case: what if self.TargetMoney > self.Money (somehow).
+            # This would imply negative spending.
+            # Make the spending at least 50% of daily_spend.
+            # Eventually, self.Money will catch up to TargetMoney.
+            targ_spend = max(targ_spend, 0.5*daily_spend)
             amount = math.floor(targ_spend / bid_price)
             self.time_series_set('DailyBid', amount*bid_price)
             if amount > 0:
@@ -886,58 +854,6 @@ class Market(agent_based_macro.entity.Entity, MarketBase):
         self.add_sell(order)
         agent.NamedOrders[name] = order.OrderID
 
-    def add_buy_deprecated(self, buyorder):
-        """
-        Add a buy order.
-
-        Note: if for some reason the new order hits a sell order from the same firm (?),
-        the firm transacts against itself.
-
-        Since the buy will release reserved inventory, it does have the effect of adding to free inventory.
-
-        This should be changed to just releasing inventory, as transacting against itself allows an Agent to
-        play games with inventory costs, and it generates taxable income.
-
-        :param buyorder:
-        :return:
-        """
-        raise DeprecationWarning('about to be deleted')
-        buyer = agent_based_macro.entity.Entity.get_entity(buyorder.FirmGID)
-        buyer.change_reserves(buyorder.Amount * buyorder.Price, ReserveType.ORDERS)
-        # If the buy price is less than the ask, we insert into BuyList
-        # Otherwise, we transact until either the buy order is completely filled, or
-        # the ask has risen past the new order's bid
-        while True:
-            if len(self.SellList) == 0:
-                # No sellers, so automatically add to BuyList
-                self.BuyList.insert_order(buyorder)
-                return
-            ask = self.SellList[0].Price
-            if buyorder.Price < ask:
-                self.BuyList.insert_order(buyorder)
-                return
-            else:
-                # Transaction!
-                self.LastPrice = ask
-                self.LastTime = simulation.get_simulation().Time
-                amount = min(self.SellList[0].Amount, buyorder.Amount)
-                seller = agent_based_macro.entity.Entity.get_entity(self.SellList[0].FirmGID)
-                payment = amount * ask
-                #
-                buyer.spend_money(payment, from_reserve=ReserveType.ORDERS)
-                seller.receive_money(payment)
-                buyer.Inventory[self.CommodityID].add_inventory(amount, payment)
-                cogs = seller.Inventory[self.CommodityID].remove_inventory(amount, from_reserve=True)
-                # TODO: Register loss from COGS
-                # Then, remove orders as needed.
-                buyorder.Amount -= amount
-                self.SellList[0].Amount -= amount
-                # Remove the front of the sell list if empty.
-                self.SellList.check_empty()
-                if buyorder.Amount == 0:
-                    # Order has been cleared out, quit processing.
-                    return
-
     def get_bid(self):
         if len(self.BuyList) > 0:
             return self.BuyList[0].Price
@@ -971,88 +887,6 @@ class Market(agent_based_macro.entity.Entity, MarketBase):
         return info
 
 
-class TravellingAgent(Agent):
-    NoLocationID = None
-
-    def __init__(self, name, coords, start_id, travelling_to_id, speed=2.):
-        super().__init__(name)
-        self.StartCoordinates = coords
-        self.StartLocID = start_id
-        self.StartTime = 0.
-        self.Speed = speed
-        self.TargetLocID = travelling_to_id
-        target = agent_based_macro.entity.Entity.get_entity(travelling_to_id)
-        self.TargetCoordinates = target.Coordinates
-        self.ArrivalTime = 0.
-        if self.StartCoordinates == target.Coordinates:
-            # Already there
-            self.StartLocID = travelling_to_id
-        else:
-            raise NotImplementedError('No support for spawning ship away from planet')
-
-    def get_coordinates(self, ttime):
-        """
-        For now, the server will calculate all locations and update upon request.
-
-        :param ttime: float
-        :return:
-        """
-        if self.StartLocID == self.TargetLocID:
-            return self.StartCoordinates
-        else:
-            if ttime > self.ArrivalTime:
-                # TODO: Add an arrival event.
-                # For now, just force the location data to update
-                self.StartLocID = self.TargetLocID
-                self.LocationID = self.TargetLocID
-                self.StartCoordinates = self.TargetCoordinates
-                return self.TargetCoordinates
-            else:
-                # progess is in [0,1]
-                progress = (ttime - self.StartTime) / (self.ArrivalTime - self.StartTime)
-                # Support N-dimensional spaces
-                out = [s + progress * (t - s) for s, t in zip(self.StartCoordinates, self.TargetCoordinates)]
-                return tuple(out)
-
-    def start_moving(self, new_target, ttime):
-        """
-        Move to a new target (always a location, not an arbitrary point.
-        :param new_target:
-        :param ttime:
-        :return:
-        """
-        coords = self.get_coordinates(ttime)
-        self.StartLocID = self.LocationID
-        self.StartTime = ttime
-        self.StartCoordinates = coords
-        self.LocationID = TravellingAgent.NoLocationID
-        self.TargetLocID = new_target
-        target_loc = agent_based_macro.entity.Entity.get_entity(new_target)
-        self.TargetCoordinates = target_loc.Coordinates
-        # Calculate distance
-        dist = 0.
-        for x1, x2 in zip(self.StartCoordinates, self.TargetCoordinates):
-            dist += pow(x1 - x2, 2)
-        dist = math.sqrt(dist)
-        self.ArrivalTime = ttime + dist / self.Speed
-
-    def get_representation(self):
-        info = super().get_representation()
-        if self.StartLocID == self.TargetLocID:
-            # Easy case: not moving.
-            coords = self.StartCoordinates
-            location = self.StartLocID
-        else:
-            sim = simulation.get_simulation()
-            ttime = sim.Time
-            coords = self.get_coordinates(ttime)
-            location = self.LocationID
-        info['Coordinates'] = coords
-        info['Location'] = location
-        info['TravellingTo'] = self.TargetLocID
-        return info
-
-
 class BaseSimulation(simulation.Simulation):
     """
     Class to manage the setup of entities.
@@ -1068,6 +902,8 @@ class BaseSimulation(simulation.Simulation):
         self.Commodities = []
         self.Markets = {}
         self.Households = {}
+        # Could be a weakref, but JG will not disappear
+        self.JGLookup = {}
         gov = CentralGovernment()
         self.add_entity(gov)
         self.CentralGovernmentID = gov.GID
@@ -1172,6 +1008,10 @@ class BaseSimulation(simulation.Simulation):
         if args[0] == 'CommodityID':
             # Format: 'CommodityID', <commodity_name> -> commodity ID.
             return self.get_commodity_by_name(args[1])
+        if args[0] == 'JG_Wage':
+            loc_id = agent.LocationID
+            JG: JobGuarantee = self.JGLookup[loc_id]
+            return JG.Wage
         raise ValueError(f'Unhandled Data Request: {args}')
 
     def process_action(self, agent, action):
