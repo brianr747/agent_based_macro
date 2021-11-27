@@ -22,8 +22,8 @@ I am not going to worry about making this too abstract to handle other potential
 Within this base class, all transactions occur within the same location. Need extensions to allow transport of goods
 between locations.
 
+Note: Agent subclasses are meant to be moved to base_simulation_agents.py
 """
-import weakref
 import enum
 import math
 
@@ -284,8 +284,9 @@ class Agent(agent_based_macro.entity.Entity):
         if ReserveType.NONE == from_reserve:
             if amount + self.ReserveMoney > self.Money:
                 raise NoFreeMoneyError(f'Spending beyond reserves: [{self.GID}]')
-            # Otherwise, goes through.
+            # Otherwise, transaction succeeds
             self.Money -= amount
+            return
         elif ReserveType.ORDERS == from_reserve:
             if amount > self.ReserveOrders:
                 raise NoFreeMoneyError(f'Order spend beyond reserves [{self.GID}]')
@@ -489,7 +490,7 @@ class ProductionAgent(Agent):
         nonlinearities, so we need to calculate the daily production
         :return: float
         """
-        return self.get_daily_production(commodity_id) / float(self.WorkersActual * self.Wage)
+        return self.Wage / self.get_productivity(commodity_id)
 
     def get_daily_wage_bill(self):
         payment = self.WorkersActual * self.Wage
@@ -511,176 +512,6 @@ class CentralGovernment(Agent):
         :return:
         """
         self.Money -= amount
-
-
-class JobGuarantee(ProductionAgent):
-    """
-    Although ech planet has its own agent, transactions use the central government money account.
-    """
-
-    def __init__(self, location_id, central_gov_id, job_guarantee_wage, num_workers=0):
-        super().__init__(money_balance=0, name='JobGuarantee', location_id=location_id)
-        self.CentralGovID = central_gov_id
-        self.WorkersActual = num_workers
-        self.Employer = True
-        self.Inventory = Inventory()
-        self.Wage = job_guarantee_wage
-        self.IsCentralGovernment = True
-        # Will find the HouseholdGID later...
-        self.HouseholdGID = None
-        self.EmployerDict = weakref.WeakValueDictionary()
-
-    def spend_money(self, amount, from_reserve=ReserveType.NONE):
-        self.get_entity(self.CentralGovID).spend_money(amount)
-
-    def receive_money(self, amount):
-        self.get_entity(self.CentralGovID).receive_money(amount)
-
-    def find_employers(self):
-        """
-        Find all the employers on a location. Call during initialisation step.
-
-        Once we can have creation/destruction of employers, will need to update live.
-        :return:
-        """
-        self.EmployerDict = weakref.WeakValueDictionary()
-        sim = self.get_entity(agent_based_macro.entity.SIMULATION_ID)
-        for ent in sim.EntityList:
-            if ent.GID == self.GID:
-                continue
-            if ent.Type == 'agent' and ent.LocationID == self.LocationID:
-                if ent.IsEmployer:
-                    self.EmployerDict[ent.GID] = ent
-
-    def register_events(self):
-        """
-
-        :return: list
-        """
-        payment_event = simulation.ActionEvent(self.GID, self.event_production, 0.02, 1.)
-        labour_event = simulation.ActionEvent(self.GID, self.event_labour_market, 0., 1.)
-        return [(payment_event, (0.04, 0.1)),
-                (labour_event, (0., .038)),]
-
-    def event_labour_market(self, *args):
-        """
-        Labour market simulation for a planet. Tie to the Job Guarantee for simplicity, but it handles all
-        movements.
-
-        There are two strategies that could be used: aggregated, versus a per-household search model.
-
-        The search model is actually simple: create a number of worker entities, and cycle through them. They will
-        drift at random towards better jobs. The problem with that it is inherently going to be random, and it is
-        easier to test a deterministic one. Instead, I will start with a deterministic drift algorithm. This should
-        be more efficient if there are a very large number of "worker units."
-
-        Note: for simplicity, do all processing inside this function, instead of using Actions.
-        """
-        if len(self.EmployerDict) == 0:
-            self.find_employers()
-        # Do in two passes.
-        # 1) Handle firing, if any. Find employers looking for workers.
-        # 2) If there are hiring employers, and there are workers in the Job Guarantee, then some workers will
-        #    drift to the employers.
-        # Need to add the possibility of workers jumping from one employer to another. Since all wages are equal for
-        # now, can defer adding that.
-        employers_hiring = []
-        total_hires = 0
-        # Calculate the total population - should not be changing!
-        total_population = self.WorkersActual
-        # Firing pass. Workers go to Job Guarantee immediately.
-        employer: Agent
-        for employer_id, employer in self.EmployerDict.items():
-            total_population += employer.WorkersActual
-            hires = employer.TargetWorkers -  employer.WorkersActual
-            # If hires = 0, no changes.
-            if hires < 0:
-                if employer.TargetWorkers < 0:
-                    raise ValueError('Cannot have negative workers')
-                # You're fired! Since hires is negative, the JobGuarantee.WorkersActual is increasing.
-                self.WorkersActual -= hires
-                employer.WorkersActual = employer.TargetWorkers
-            elif hires > 0:
-                employers_hiring.append(employer_id)
-                total_hires += hires
-        # Pass two: if there are workers in the JobGuarantee, they go to private workers.
-        # TODO: Add wage logic. Right now, since wages are fixed, do not need to take wages into account.
-        # To slow down dynamics slightly, assume that only 1/3 of the JobGuarantee workers can be hired in a day,
-        # rounded up.
-        actual_hires = min(total_hires, math.ceil(float(self.WorkersActual)/3.))
-        if actual_hires > 0:
-            # Since not every employer can get their desired workers, be unfair and give rounded up portions to
-            # employers in order. This means that employers at the end of the list will miss out if there are fractions.
-            assignment_fraction = float(actual_hires)/float(total_hires)
-            for employer_id in employers_hiring:
-                employer = self.EmployerDict[employer_id]
-                num_hired = math.ceil(assignment_fraction*(employer.TargetWorkers-employer.WorkersActual))
-                # No rounding above the number of workers to be hired
-                num_hired = min(num_hired, actual_hires)
-                actual_hires -= num_hired
-                employer.WorkersActual += num_hired
-                self.WorkersActual -= num_hired
-        # Calculate the unemployment rate
-        unemployment = float(self.WorkersActual)/float(total_population)
-        self.time_series_set('unemployment', unemployment)
-
-    def event_production(self, *args):
-        """
-        Do the production operation.
-
-        This method has been switched over to use Actions.
-
-        Actions triggered
-        (i) PayWages
-        (ii) ProductionLabour
-        (iii) DelayEvent - call event_set_orders() with a delay.
-
-        (Note: Will need to create a DelayEvent as an ActionEvent.
-
-        :param args:
-        :return:
-        """
-        # Since the HouseholdSector and central government are indestructible (I hope), this transfer will always
-        # be valid. (Normally, need to validate existence of all entities.)
-        payment = self.get_daily_wage_bill()
-        self.add_action('PayWages', payment)
-        # JG Production
-        self.add_action('ProductionLabour', 'Fud', self.WorkersActual, payment)
-        # The data needed by event_set_orders: the productivity of Fud production, as well as the ID of Fud.
-        # Note: Should save the FoodID in the class, since needed every time.
-        data_queries = {
-            'Productivity': ('Productivity', 'Fud'),
-            'FudID': ('CommodityID', 'Fud')
-        }
-        self.add_action('QueueActionEventWithDelay', self.event_set_orders, .1, data_queries)
-
-    def event_set_orders(self, *args):
-        """
-        Set up buy/sell orders.
-
-        Keep it as simple as possible, to allow the loop to close.
-
-        Currently, sets up three named orders
-        (1) 'floor': A floor price bid for 300 units.
-        (2) 'production': Sale of most production at 110% of production cost.
-        (3) 'emergency': sale of remainder at 150% of production cost.
-        :return:
-        """
-        food_id = self.ActionData['FudID']
-        productivity = self.ActionData['Productivity']
-        production_price = self.Wage / productivity
-        # Create a floor
-        price = production_price * .95
-        amount = 300
-        self.add_action('AddNamedBuy', 'floor', food_id, price, amount)
-        available = self.Inventory[food_id].Amount - self.Inventory[food_id].Reserved
-        production_amount = int(available*0.7)
-        self.add_action('AddNamedSell', 'production', food_id, production_price * 1.1, production_amount)
-        self.time_series_set('production', production_price * 1.1 * production_amount)
-        remainder = available - production_amount
-        self.add_action('AddNamedSell', 'emergency', food_id, production_price * 1.5,remainder)
-        self.time_series_set('emergency', production_price * 1.5 * remainder)
-
 
 
 class HouseholdSector(Agent):
@@ -798,6 +629,10 @@ class Market(agent_based_macro.entity.Entity, MarketBase):
         MarketBase.__init__(self)
         self.LocationID = location_id
         self.CommodityID = commodity_id
+        # Since the market will always be calling the Simulation to log transactions, embed a reference to
+        # the Simulation inside the Market.
+        self.Simulation = simulation.get_simulation()
+
 
     def get_time(self):
         """
@@ -885,6 +720,19 @@ class Market(agent_based_macro.entity.Entity, MarketBase):
         info['LastPrice'] = self.LastPrice
         info['LastTime'] = self.LastTime
         return info
+
+    def log_transaction(self, buy_id, sell_id, initiated_id, amount, price):
+        """
+        Transaction logging. Must be implemented in a child class.
+        :param buy_id: int
+        :param sell_id: int
+        :param initiated_id: int
+        :param amount: int
+        :param price: int
+        :return:
+        """
+        # Let the simulation do the work...
+        self.Simulation.log_transaction(self.GID, buy_id, sell_id, initiated_id, amount, price)
 
 
 class BaseSimulation(simulation.Simulation):
@@ -1010,7 +858,7 @@ class BaseSimulation(simulation.Simulation):
             return self.get_commodity_by_name(args[1])
         if args[0] == 'JG_Wage':
             loc_id = agent.LocationID
-            JG: JobGuarantee = self.JGLookup[loc_id]
+            JG = self.JGLookup[loc_id]
             return JG.Wage
         raise ValueError(f'Unhandled Data Request: {args}')
 
@@ -1085,3 +933,24 @@ class BaseSimulation(simulation.Simulation):
             commodity_id = commodity
         production = agent.get_daily_production(commodity_id)
         agent.Inventory[commodity_id].add_inventory(production, payment)
+
+    def log_transaction(self, market_id, buy_id, sell_id, initiated_id, amount, price):
+        """
+        Transaction logging. Must be implemented in a child class.
+        :param buy_id: int
+        :param sell_id: int
+        :param initiated_id: int
+        :param amount: int
+        :param price: int
+        :return:
+        """
+        if 'transactions' not in self.LogDict:
+            return
+        market_name = self.get_entity(market_id).Name
+        buy_name = self.get_entity(buy_id).Name
+        sell_name = self.get_entity(sell_id).Name
+        elems = (self.Time, market_name, market_id, buy_name, buy_id, sell_name, sell_id, initiated_id, amount, price)
+        elems = [str(x) for x in elems]
+        msg = '\t'.join(elems)
+        self.log_msg('transactions', msg)
+

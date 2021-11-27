@@ -188,6 +188,8 @@ class MarketBase(object):
                                    operation='fill', amount=amount, price=ask)
                 self.do_accounting(firm_gid=self.SellList[0].FirmGID, order_type=OrderType.SELL,
                                    operation='fill', amount=amount, price=ask)
+                self.log_transaction(buy_id=buy_order.FirmGID, sell_id=self.SellList[0].FirmGID,
+                                     initiated_id=buy_order.FirmGID, amount=amount, price=ask)
                 # Then, decrease both order sizes by the fill amount.
                 buy_order.Amount -= amount
                 self.SellList[0].Amount -= amount
@@ -241,6 +243,8 @@ class MarketBase(object):
                                    operation='fill', amount=amount, price=bid)
                 self.do_accounting(firm_gid=self.BuyList[0].FirmGID, order_type=OrderType.BUY,
                                    operation='fill', amount=amount, price=bid)
+                self.log_transaction(buy_id=self.BuyList[0].FirmGID, sell_id=sell_order.FirmGID,
+                                     initiated_id=sell_order.FirmGID, amount=amount, price=bid)
                 # Then, decrease both order sizes by the fill amount.
                 sell_order.Amount -= amount
                 self.BuyList[0].Amount -= amount
@@ -277,4 +281,16 @@ class MarketBase(object):
         if found is not None:
             self.do_accounting(firm_gid=found.FirmGID, order_type=order_type, operation='remove',
                                amount=found.Amount, price=found.Price)
+
+    def log_transaction(self, buy_id, sell_id, initiated_id, amount, price):
+        """
+        Transaction logging. Must be implemented in a child class.
+        :param buy_id: int
+        :param sell_id: int
+        :param initiated_id: int
+        :param amount: int
+        :param price: int
+        :return:
+        """
+        pass
 

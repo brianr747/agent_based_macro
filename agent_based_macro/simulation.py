@@ -199,6 +199,9 @@ class Simulation(ABC, Entity):
         # How many Actions can be processed?
         self.MaxActionLimit = 100
         self.TimeSeriesDict = {}
+        # Allow for a variable number of logs that have some central management
+        self.LogDict = {}
+        self.SeriesFileName = None
 
     def add_entity(self, entity):
         """
@@ -456,3 +459,32 @@ class Simulation(ABC, Entity):
                 else:
                     f.write(f'{increment*i}\t{val:6g}\n')
         f.close()
+
+    def shutdown(self):
+        """
+        Shutdown protocol - dump time series, close logs
+        :return:
+        """
+        if self.SeriesFileName is not None:
+            self.dump_time_series(self.SeriesFileName)
+        for log in self.LogDict.values():
+            log.close()
+
+    def open_log(self, log_name, log_file_name):
+        self.LogDict[log_name] = open(log_file_name, 'w')
+
+    def log_msg(self, log_name, msg, auto_append_endline=True):
+        """
+        Log a message - if the associated log is open.
+
+        :param auto_append_endline: bool
+        :param log_name: str
+        :param msg: str
+        :return:
+        """
+        if log_name not in self.LogDict:
+            return
+        if auto_append_endline:
+            if not msg.endswith('\n'):
+                msg += '\n'
+        self.LogDict[log_name].write(msg)
