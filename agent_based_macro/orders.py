@@ -8,6 +8,8 @@ import weakref
 from abc import ABC, abstractmethod
 
 # Order ID: all negative, so we don't repeat Entity IDs.
+from agent_based_macro import errors
+
 GLastOrderID = -1
 # Another lookup
 GOrderDict = weakref.WeakValueDictionary()

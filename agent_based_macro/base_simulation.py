@@ -28,24 +28,11 @@ import enum
 import math
 
 import agent_based_macro.entity
+from agent_based_macro import errors
 from agent_based_macro.entity import Entity
 from agent_based_macro.orders import SellOrder, BuyOrder, MarketBase, OrderType
-from agent_based_macro.simulation import SimulationError
+from agent_based_macro.errors import NoMoneyError, NoFreeMoneyError, ReserveError
 import agent_based_macro.simulation as simulation
-
-
-class NoMoneyError(SimulationError):
-    pass
-
-
-class NoFreeMoneyError(SimulationError):
-    """Attempting to spend beyond free money capacity"""
-    pass
-
-
-class ReserveError(SimulationError):
-    """ Attempting to reduce reserve to a negative amount"""
-    pass
 
 
 class Location(agent_based_macro.entity.Entity):
@@ -138,7 +125,7 @@ class InventoryInfo(object):
         :return:
         """
         if amount + self.Reserved > self.Amount:
-            raise ValueError('Attempting to reserve more than exists')
+            raise errors.CommodityReserveError('Attempting to reserve more than exists')
         self.Reserved += amount
         if self.Reserved < 0:
             raise ValueError('Attempting to set negative reserves')
@@ -194,6 +181,10 @@ class Inventory(object):
             # If we were cautious, validate that "item" is a commodityID
             self.Commodities[item] = InventoryInfo(item)
         return self.Commodities[item]
+
+    def get_representation_info(self):
+        out = [(x, y.Amount, y.Cost) for x,y in self.Commodities.items()]
+        return out
 
 
 class Agent(agent_based_macro.entity.Entity):
@@ -757,6 +748,9 @@ class BaseSimulation(simulation.Simulation):
         self.CentralGovernmentID = gov.GID
         # A location that is not really a location -- off the logical grid.
         self.NonLocationID = None
+        # For invalid actions for players, send a message to the client, otherwise throw an error.
+        # Need to keep a list of Agents that are player-associated.
+        self.PlayerGID = set()
 
     def add_entity(self, entity):
         """
@@ -909,6 +903,36 @@ class BaseSimulation(simulation.Simulation):
             market = self.get_market(agent.LocationID, commodity_id)
             order = SellOrder(price, amount, agent.GID)
             market.add_named_sell(agent, name, order)
+        elif action.args[0] == 'BuyNoKeep':
+            commodity_id = action.args[1]
+            price = action.args[2]
+            amount = action.args[3]
+            market = self.get_market(agent.LocationID, commodity_id)
+            order = BuyOrder(price, amount, agent.GID)
+            order.KeepInQueue = False
+            try:
+                market.add_buy(order)
+            except errors.NoFreeMoneyError:
+                if agent.GID in self.PlayerGID:
+                    event = simulation.Event(self.GID, self.event_send_invalid_action, self.Time, None, 'NoFreeMoney')
+                    simulation.queue_event(event)
+                else:
+                    raise
+        elif action.args[0] == 'SellNoKeep':
+            commodity_id = action.args[1]
+            price = action.args[2]
+            amount = action.args[3]
+            market = self.get_market(agent.LocationID, commodity_id)
+            order = SellOrder(price, amount, agent.GID)
+            order.KeepInQueue = False
+            try:
+                market.add_sell(order)
+            except errors.CommodityReserveError:
+                if agent.GID in self.PlayerGID:
+                    event = simulation.Event(self.GID, self.event_send_invalid_action, self.Time, None, 'NotEnoughCommodity')
+                    simulation.queue_event(event)
+                else:
+                    raise
         else:
             raise ValueError(f'Unknown Action arguments: {action.args}')
 
@@ -953,4 +977,7 @@ class BaseSimulation(simulation.Simulation):
         elems = [str(x) for x in elems]
         msg = '\t'.join(elems)
         self.log_msg('transactions', msg)
+
+    def event_send_invalid_action(self, *args):
+        raise ValueError('bink')
 

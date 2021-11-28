@@ -95,8 +95,8 @@ class ProducerLabour(ProductionAgent):
 class TravellingAgent(Agent):
     NoLocationID = None
 
-    def __init__(self, name, coords, start_id, travelling_to_id, speed=2.):
-        super().__init__(name)
+    def __init__(self, name, coords, start_id, travelling_to_id, speed=2., money_balance=0):
+        super().__init__(name, money_balance=money_balance)
         self.StartCoordinates = coords
         self.StartLocID = start_id
         self.StartTime = 0.
@@ -108,6 +108,7 @@ class TravellingAgent(Agent):
         if self.StartCoordinates == target.Coordinates:
             # Already there
             self.StartLocID = travelling_to_id
+            self.LocationID = self.StartLocID
         else:
             raise NotImplementedError('No support for spawning ship away from planet')
 
@@ -119,6 +120,7 @@ class TravellingAgent(Agent):
         :return:
         """
         if self.StartLocID == self.TargetLocID:
+            self.LocationID = self.StartLocID
             return self.StartCoordinates
         else:
             if ttime > self.ArrivalTime:
@@ -126,6 +128,7 @@ class TravellingAgent(Agent):
                 # For now, just force the location data to update
                 self.StartLocID = self.TargetLocID
                 self.LocationID = self.TargetLocID
+                self.LocationID = self.StartLocID
                 self.StartCoordinates = self.TargetCoordinates
                 return self.TargetCoordinates
             else:
@@ -171,7 +174,25 @@ class TravellingAgent(Agent):
         info['Coordinates'] = coords
         info['Location'] = location
         info['TravellingTo'] = self.TargetLocID
+        info['Money'] = self.Money
+        info['Inventory'] = self.Inventory.get_representation_info()
         return info
+
+    def event_buy(self, args):
+        # Args are wrapped inside a tuple (sigh)
+        inargs = args[0]
+        commodity_id = inargs[0]
+        price = inargs[1]
+        amount = inargs[2]
+        self.add_action('BuyNoKeep', commodity_id, price, amount)
+
+    def event_sell(self, args):
+        # Args are wrapped inside a tuple (sigh)
+        inargs = args[0]
+        commodity_id = inargs[0]
+        price = inargs[1]
+        amount = inargs[2]
+        self.add_action('SellNoKeep', commodity_id, price, amount)
 
 
 class JobGuarantee(ProductionAgent):

@@ -43,8 +43,7 @@ from abc import ABC, abstractmethod
 
 import agent_based_macro.entity
 import agent_based_macro.utils as utils
-from agent_based_macro.entity import EntityDoesNotExist, EntityDead, Entity, reset_entities, ActionDataRequest, \
-    ActionCallback, ActionQueueEventWithDelay
+from agent_based_macro.entity import EntityDoesNotExist, EntityDead, Entity, reset_entities, ActionDataRequest
 
 GSimulation = None
 
@@ -56,11 +55,6 @@ def get_simulation():
     """
     global GSimulation
     return GSimulation
-
-
-class SimulationError(ValueError):
-    """ Base class for all Simulation-thrown Exceptions"""
-    pass
 
 
 class Event(object):
