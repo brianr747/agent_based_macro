@@ -193,6 +193,19 @@ class Agent(agent_based_macro.entity.Entity):
 
     ParentID = immediate owner
     TopParentID = top of ownership hierarchy (= "faction")
+
+    TODO: Add connections for switchable AI decision events. Each decision rule has a name, and the
+    selected one is called during the decision event associated with that rule. Events that do not make
+    decisions (e.g., production) are fixed. Each decision event has its associated named rule, their might be
+    high level "personalities" that choose a particular mix.
+
+    I think the way to add decision rules is to make them separate functions with a standard calling syntax,
+    and then the decision code returns the Actions to be taken. The decision function can use a type hint
+    to fill in the Agent subclass, so that the decision rule can then use code completion in an development
+    environment that supports them (in my case, PyCharm).
+
+    Making the decision rules functions will make it easy for people to muck around with Agent behaviour without
+    having to know too much about object-oriented coding (they will need to access data members, but that is natural).
     """
 
     def __init__(self, name, money_balance=0, location_id=None):
