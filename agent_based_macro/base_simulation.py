@@ -846,28 +846,28 @@ class BaseSimulation(simulation.Simulation):
         cgov = agent_based_macro.entity.Entity.get_entity(self.CentralGovernmentID)
         cgov.receive_money(amount)
 
-    def get_action_data(self, agent, *args):
+    def get_action_data(self, agent, **kwargs):
         """
         Get requested data.
         :param agent: Agent
         :param args:
         :return:
         """
-        if args[0] == 'Productivity':
+        if kwargs['request'] == 'Productivity':
             # FORMAT: 'Productivity', <commodity name or ID> -> productivity factor for agent's location.
-            if type(args[1]) is str:
-                commodity_id = self.get_commodity_by_name(args[1])
+            if type(kwargs['commodity']) is str:
+                commodity_id = self.get_commodity_by_name(kwargs['commodity'])
             else:
-                commodity_id = args[1]
+                commodity_id = kwargs['commodity']
             return agent.get_productivity(commodity_id)
-        if args[0] == 'CommodityID':
+        if kwargs['request'] == 'CommodityID':
             # Format: 'CommodityID', <commodity_name> -> commodity ID.
-            return self.get_commodity_by_name(args[1])
-        if args[0] == 'JG_Wage':
+            return self.get_commodity_by_name(kwargs['commodity'])
+        if kwargs['request'] == 'JG_Wage':
             loc_id = agent.LocationID
             JG = self.JGLookup[loc_id]
             return JG.Wage
-        raise ValueError(f'Unhandled Data Request: {args}')
+        raise ValueError(f'Unhandled Data Request: {kwargs["request"]}')
 
     def process_action(self, agent, action):
         """
@@ -885,41 +885,38 @@ class BaseSimulation(simulation.Simulation):
         :return:
         """
         # Switch to match for Python 3.10
-        if action.args[0] == 'PayWages':
+        if action.KWArgs['action_type'] == 'PayWages':
             # We assume that there is only a single aggregated Household to get all wages.
             household_id = self.Households[agent.LocationID]
             household: HouseholdSector = agent_based_macro.entity.Entity.get_entity(household_id)
-            if len(action.args) == 0:
-                raise ValueError('PayWages Action: Need to specify amount as second parameter')
-            else:
-                amount = int(action.args[1])
+            amount = int(action.KWArgs['payment'])
             agent.spend_money(amount=amount)
             household.receive_wages(amount=amount)
-        elif action.args[0] == 'ProductionLabour':
-            commodity = action.args[1]
-            num_workers = action.args[2]
-            payment = action.args[3]
+        elif action.KWArgs['action_type'] == 'ProductionLabour':
+            commodity = action.KWArgs['commodity']
+            num_workers = action.KWArgs['num_workers']
+            payment = action.KWArgs['payment']
             self.action_production_labour(agent, commodity, num_workers, payment)
-        elif action.args[0] == 'AddNamedBuy':
-            name = action.args[1]
-            commodity_id = action.args[2]
-            price = action.args[3]
-            amount = action.args[4]
+        elif action.KWArgs['action_type'] == 'AddNamedBuy':
+            name = action.KWArgs['name']
+            commodity_id = action.KWArgs['commodity_id']
+            price = action.KWArgs['price']
+            amount = action.KWArgs['amount']
             market = self.get_market(agent.LocationID, commodity_id)
             order = BuyOrder(price, amount, agent.GID)
             market.add_named_buy(agent, name, order)
-        elif action.args[0] == 'AddNamedSell':
-            name = action.args[1]
-            commodity_id = action.args[2]
-            price = action.args[3]
-            amount = action.args[4]
+        elif action.KWArgs['action_type'] == 'AddNamedSell':
+            name = action.KWArgs['name']
+            commodity_id = action.KWArgs['commodity_id']
+            price = action.KWArgs['price']
+            amount = action.KWArgs['amount']
             market = self.get_market(agent.LocationID, commodity_id)
             order = SellOrder(price, amount, agent.GID)
             market.add_named_sell(agent, name, order)
-        elif action.args[0] == 'BuyNoKeep':
-            commodity_id = action.args[1]
-            price = action.args[2]
-            amount = action.args[3]
+        elif action.KWArgs['action_type'] == 'BuyNoKeep':
+            commodity_id = action.KWArgs['commodity_id']
+            price = action.KWArgs['price']
+            amount = action.KWArgs['amount']
             market = self.get_market(agent.LocationID, commodity_id)
             order = BuyOrder(price, amount, agent.GID)
             order.KeepInQueue = False
@@ -927,14 +924,15 @@ class BaseSimulation(simulation.Simulation):
                 market.add_buy(order)
             except errors.NoFreeMoneyError:
                 if agent.GID in self.PlayerGID:
-                    event = simulation.Event(self.GID, self.event_send_invalid_action, self.Time, None, 'NoFreeMoney')
+                    event = simulation.Event(self.GID, self.event_send_invalid_action, self.Time, None,
+                                             response='NoFreeMoney')
                     simulation.queue_event(event)
                 else:
                     raise
-        elif action.args[0] == 'SellNoKeep':
-            commodity_id = action.args[1]
-            price = action.args[2]
-            amount = action.args[3]
+        elif action.KWArgs['action_type'] == 'SellNoKeep':
+            commodity_id = action.KWArgs['commodity_id']
+            price = action.KWArgs['price']
+            amount = action.KWArgs['amount']
             market = self.get_market(agent.LocationID, commodity_id)
             order = SellOrder(price, amount, agent.GID)
             order.KeepInQueue = False
@@ -942,12 +940,13 @@ class BaseSimulation(simulation.Simulation):
                 market.add_sell(order)
             except errors.CommodityReserveError:
                 if agent.GID in self.PlayerGID:
-                    event = simulation.Event(self.GID, self.event_send_invalid_action, self.Time, None, 'NotEnoughCommodity')
+                    event = simulation.Event(self.GID, self.event_send_invalid_action, self.Time, None,
+                                             response='NotEnoughCommodity')
                     simulation.queue_event(event)
                 else:
                     raise
         else:
-            raise ValueError(f'Unknown Action arguments: {action.args}')
+            raise ValueError(f'Unknown Action arguments: {action.KWArgs}')
 
     def action_production_labour(self, agent, commodity, num_workers, payment):
         """

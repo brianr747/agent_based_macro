@@ -44,6 +44,7 @@ from abc import ABC, abstractmethod
 import agent_based_macro.entity
 import agent_based_macro.utils as utils
 from agent_based_macro.entity import EntityDoesNotExist, EntityDead, Entity, reset_entities, ActionDataRequest
+from agent_based_macro.data_requests import ActionDataRequestHolder
 
 GSimulation = None
 
@@ -64,26 +65,32 @@ class Event(object):
     Queued based on calltime, and will be popped from queue once that time is hit.
 
     Once popped, the entity with GID will have its method event_{Callback}(args) called.
+
+    Use the Simulation GID for simulation-level events.
     """
-    def __init__(self, gid, callback, calltime, repeat, *args):
+    def __init__(self, gid, callback, calltime, repeat, **kwargs):
         self.GID = gid
         self.Callback = callback
         self.CallTime = calltime
         # If None, does not repeat. Otherwise, framework will reinsert with the CallTime incremented by Repeat.
         # I.e., if repeat = 1, repeat daily.
         self.Repeat = repeat
-        self.args = args
+        self.KWArgs = kwargs
 
     def __lt__(self, other):
         return self.CallTime < other.CallTime
 
     def __call__(self):
+        """
+        Throws an error if the GID no longer corresponds to an Entity
+        :return:
+        """
         # This might throw an error, if the entity is gone. Calling Simulation will eat this.
         # It needs to know so that the Event is not put back in the queue if it's a repeater...
         entity = Entity.get_entity(self.GID)
         # meth = getattr(entity, f'event_{self.Action}')
         # args = self.args
-        return self.Callback(*self.args)
+        return self.Callback(**self.KWArgs)
 
 
 def queue_event(event):
@@ -107,18 +114,17 @@ class ActionEvent(Event):
     (2) The action
 
     """
-    def __init__(self, gid, callback, calltime, repeat, *args):
-        super().__init__(gid, callback, calltime, repeat, args)
-        self.DataRequests = []
+    def __init__(self, gid, callback, calltime, repeat, **kwargs):
+        super().__init__(gid, callback, calltime, repeat, **kwargs)
+        self.DataRequests = ActionDataRequestHolder()
 
-    def add_data_request(self, name, *args):
+    def add_data_request(self, name, **kwargs):
         """
         Add a data request that will have data stored under "name"
         :param name: str
-        :param args:
         :return:
         """
-        self.DataRequests.append((name, *args))
+        self.DataRequests.add_request(name, kwargs)
 
 
 class Client(object):
@@ -224,7 +230,7 @@ class Simulation(ABC, Entity):
             event.CallTime = actual_time
             queue_event(event)
 
-    def queue_event_delay(self, gid, action, delay, *args):
+    def queue_event_delay(self, gid, action, delay, **kwargs):
         """
         Queue an event with a delay versus current time. Does not repeat.
         :param gid: int
@@ -233,13 +239,14 @@ class Simulation(ABC, Entity):
         :param args:
         :return:
         """
-        event = Event(gid, action, self.Time + delay, None, *args)
+        event = Event(gid, action, self.Time + delay, None, **kwargs)
         queue_event(event)
 
-    def queue_action_event_delay(self, gid, callback, delay, data_dict):
+    def queue_action_event_delay(self, gid, callback, delay, data_requests=None):
         event = ActionEvent(gid, callback, self.Time + delay, repeat=None)
-        for k,v in data_dict.items():
-            event.add_data_request(k, v)
+        if data_requests is not None:
+            # Force data_requests to be an ActionDataRequestHolder, which allows a dict to be passed.
+            event.DataRequests = ActionDataRequestHolder(data_requests)
         queue_event(event)
 
     def get_entity(self, gid):
@@ -313,10 +320,10 @@ class Simulation(ABC, Entity):
         ent.ActionData = {}
         # Actions requested by the Entity
         ent.ActionQueue = []
-        for name, data_args in action_event.DataRequests:
-            ent.ActionData[name] = self.get_action_data(ent, *data_args)
+        for name, data_args in action_event.DataRequests.DataDict.items():
+            ent.ActionData[name] = self.get_action_data(ent, **data_args)
         # Run the callback
-        action_event.Callback(action_event.args)
+        action_event.Callback(**action_event.KWArgs)
         # Then, do the requested actions.
         cnt = 0
         while len(ent.ActionQueue) > 0:
@@ -330,7 +337,7 @@ class Simulation(ABC, Entity):
             except NotImplementedError:
                 # Simulation-level action handlers for data, or whatever else.
                 if isinstance(action, ActionDataRequest):
-                    ent.ActionData[action.Name] = self.get_action_data(ent, action.args)
+                    ent.ActionData[action.Name] = self.get_action_data(ent, **action.args)
                 else:
                     self.process_action(ent, action)
 
@@ -346,7 +353,7 @@ class Simulation(ABC, Entity):
         pass
 
     @abstractmethod
-    def get_action_data(self, agent, *args):
+    def get_action_data(self, agent, **kwargs):
         """
         Function that needs to be overriden by subclasses to do data fetching. Each simulation will
         have to work out its own protocol.
@@ -359,10 +366,10 @@ class Simulation(ABC, Entity):
 
     def process_command(self):
         obj = self.ClientCommands.pop(0)
-        if len(obj.args) == 0:
+        if len(obj.KWArgs) == 0:
             obj.server_command(self)
         else:
-            obj.server_command(self, *obj.args)
+            obj.server_command(self, **obj.KWArgs)
 
     def increment_time(self):
         """
@@ -407,10 +414,10 @@ class Simulation(ABC, Entity):
     def process_client_message_queue(self):
         """ This would be replaced by client-server code."""
         client_id, msg = self.ClientMessages.pop()
-        if len(msg.args) == 0:
+        if len(msg.KWArgs) == 0:
             msg.client_message(self.ClientDict[client_id])
         else:
-            msg.client_message(self.ClientDict[client_id], *msg.args)
+            msg.client_message(self.ClientDict[client_id], **msg.KWArgs)
 
     def register_time_series(self, name, freq=1., fill=None):
         """

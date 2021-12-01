@@ -43,15 +43,11 @@ class ProducerLabour(ProductionAgent):
 
     def register_events(self):
         hiring_event = simulation.ActionEvent(self.GID, self.event_hiring, .05, 1.)
-        hiring_event.add_data_request('JG_Wage', ('JG_Wage',))
+        hiring_event.add_data_request('JG_Wage', request='JG_Wage')
         production_event = simulation.ActionEvent(self.GID, self.event_production, .5, 1.)
-        data_queries = {
-            'Productivity': ('Productivity', 'Fud'),
-            'FudID': ('CommodityID', 'Fud')
-        }
         sales_event = simulation.ActionEvent(self.GID, self.event_sales, .75, 1.)
-        sales_event.add_data_request('Productivity', ('Productivity', 'Fud'))
-        sales_event.add_data_request('FudID', ('CommodityID', 'Fud'))
+        sales_event.add_data_request('Productivity', request="Productivity", commodity='Fud')
+        sales_event.add_data_request('FudID', request='CommodityID', commodity='Fud')
         return [(hiring_event, (0., 0.2)),
                 (production_event, (.21, .5)),
                 (sales_event, (.02, .99))]
@@ -76,9 +72,10 @@ class ProducerLabour(ProductionAgent):
         """
         payment = self.get_daily_wage_bill()
         self.time_series_set('wage_payment', payment)
-        self.add_action('PayWages', payment)
+        self.add_action(action_type='PayWages', payment=payment)
         # JG Production
-        self.add_action('ProductionLabour', 'Fud', self.WorkersActual, payment)
+        self.add_action(action_type='ProductionLabour', commodity='Fud', num_workers=self.WorkersActual,
+                        payment=payment)
 
     def event_sales(self, *args):
         # for now, just sell at fixed price...
@@ -88,8 +85,8 @@ class ProducerLabour(ProductionAgent):
         # Aim for a 10% profit margin
         amount = math.ceil(self.Inventory[fud_id].Amount*.99)
         if amount > 0:
-            self.add_action('AddNamedSell', 'production', fud_id, unit_cost * 1.1, amount)
-
+            self.add_action(action_type='AddNamedSell', name='production', commodity_id=fud_id,
+                            price=unit_cost * 1.1, amount=amount)
 
 
 class TravellingAgent(Agent):
@@ -178,21 +175,17 @@ class TravellingAgent(Agent):
         info['Inventory'] = self.Inventory.get_representation_info()
         return info
 
-    def event_buy(self, args):
-        # Args are wrapped inside a tuple (sigh)
-        inargs = args[0]
-        commodity_id = inargs[0]
-        price = inargs[1]
-        amount = inargs[2]
-        self.add_action('BuyNoKeep', commodity_id, price, amount)
+    def event_buy(self, **kwargs):
+        commodity_id = kwargs['commodity_id']
+        price = kwargs['price']
+        amount = kwargs['amount']
+        self.add_action(action_type='BuyNoKeep', commodity_id=commodity_id, price=price, amount=amount)
 
-    def event_sell(self, args):
-        # Args are wrapped inside a tuple (sigh)
-        inargs = args[0]
-        commodity_id = inargs[0]
-        price = inargs[1]
-        amount = inargs[2]
-        self.add_action('SellNoKeep', commodity_id, price, amount)
+    def event_sell(self, **kwargs):
+        commodity_id = kwargs['commodity_id']
+        price = kwargs['price']
+        amount = kwargs['amount']
+        self.add_action(action_type='SellNoKeep', commodity_id=commodity_id, price=price, amount=amount)
 
 
 class JobGuarantee(ProductionAgent):
@@ -325,16 +318,18 @@ class JobGuarantee(ProductionAgent):
         # Since the HouseholdSector and central government are indestructible (I hope), this transfer will always
         # be valid. (Normally, need to validate existence of all entities.)
         payment = self.get_daily_wage_bill()
-        self.add_action('PayWages', payment)
+        self.add_action(action_type='PayWages', payment=payment)
         # JG Production
-        self.add_action('ProductionLabour', 'Fud', self.WorkersActual, payment)
+        self.add_action(action_type='ProductionLabour', commodity='Fud', num_workers=self.WorkersActual,
+                        payment=payment)
         # The data needed by event_set_orders: the productivity of Fud production, as well as the ID of Fud.
         # Note: Should save the FoodID in the class, since needed every time.
         data_queries = {
-            'Productivity': ('Productivity', 'Fud'),
-            'FudID': ('CommodityID', 'Fud')
+            'Productivity': {'request': 'Productivity', 'commodity': 'Fud'},
+            'FudID': {'request': 'CommodityID', 'commodity': 'Fud'}
         }
-        self.add_action('QueueActionEventWithDelay', self.event_set_orders, .1, data_queries)
+        self.add_action(action_type='QueueActionEventWithDelay', call_back=self.event_set_orders, delay=.1,
+                        input_data_dict=data_queries)
 
     def event_set_orders(self, *args):
         """
@@ -354,11 +349,13 @@ class JobGuarantee(ProductionAgent):
         # Create a floor
         price = production_price * .95
         amount = 300
-        self.add_action('AddNamedBuy', 'floor', food_id, price, amount)
+        self.add_action(action_type='AddNamedBuy', name='floor', commodity_id=food_id, price=price, amount=amount)
         available = self.Inventory[food_id].Amount - self.Inventory[food_id].Reserved
         production_amount = int(available*0.7)
-        self.add_action('AddNamedSell', 'production', food_id, production_price * 1.1, production_amount)
+        self.add_action(action_type='AddNamedSell', name='production', commodity_id=food_id,
+                        price=production_price * 1.1, amount=production_amount)
         self.time_series_set('production', production_price * 1.1 * production_amount)
         remainder = available - production_amount
-        self.add_action('AddNamedSell', 'emergency', food_id, production_price * 1.5,remainder)
+        self.add_action(action_type='AddNamedSell', name='emergency', commodity_id=food_id, price=production_price * 1.5,
+                        amount=remainder)
         self.time_series_set('emergency', production_price * 1.5 * remainder)

@@ -16,6 +16,8 @@ problems (or so I hope).
 
 import weakref
 
+from agent_based_macro.data_requests import ActionDataRequestHolder
+
 lastGID = 0
 GEntityDict = weakref.WeakValueDictionary()
 SIMULATION_ID = None
@@ -49,40 +51,32 @@ class Entity(object):
                 'Name': self.Name,
                 'Type': self.Type}
 
-    def add_action(self, *args):
+    def add_action(self, **kwargs):
         """
         Add an Action to the ActionQueue
         :param args:
         :return:
         """
-        if len(args) == 0:
-            return
-        if args[0] == 'DataRequest':
-            if len(args) < 3:
-                raise ValueError("DataRequest has at least 3 arguments: 'DataRequest', <name>, <args*>")
-            self.ActionQueue.append(ActionDataRequest(args[1], args[2:]))
-        elif args[0] == 'Callback':
-            if len(args) < 2:
-                raise ValueError("Callback has at least 2 arguments: 'Callback', <handler>, <*args>")
-            elif len(args) == 2:
-                self.ActionQueue.append(ActionCallback(args[1]))
-            else:
-                self.ActionQueue.append(ActionCallback(args[1], *args[2:]))
-        elif args[0] == 'QueueEventWithDelay':
-            self.ActionQueue.append(ActionQueueEventWithDelay(args[1], args[2], args[3:]))
-        elif args[0] == 'QueueActionEventWithDelay':
+        action_type=kwargs['action_type']
+        if action_type == 'DataRequest':
+            self.ActionQueue.append(ActionDataRequest(**kwargs))
+        elif action_type == 'Callback':
+            self.ActionQueue.append(ActionCallback(**kwargs))
+        elif action_type == 'QueueEventWithDelay':
+            self.ActionQueue.append(ActionQueueEventWithDelay(**kwargs))
+        elif action_type == 'QueueActionEventWithDelay':
             # Create an ActionEVent that is delayed.
-            if len(args) == 3:
-                call_back, delay = args[1:]
-                input_data_dict = {}
+            call_back = kwargs.pop('call_back')
+            delay = kwargs.pop('delay')
+            if 'input_data_dict' in kwargs:
+                input_data_dict = kwargs.pop('input_data_dict')
             else:
-                call_back = args[1]
-                delay = args[2]
-                input_data_dict = args[3]
-            self.ActionQueue.append(ActionQueueActionEventWithDelay(call_back, delay, input_data_dict))
+                input_data_dict = {}
+            self.ActionQueue.append(ActionQueueActionEventWithDelay(call_back, delay, input_data_dict,
+                                                                    **kwargs))
         else:
             # Generic Action to be handled by the Simulation subclass
-            self.ActionQueue.append(Action(*args))
+            self.ActionQueue.append(Action(**kwargs))
 
     @staticmethod
     def get_entity(gid):
@@ -145,8 +139,8 @@ class Action(object):
     """
     Actions that are requested by Entities during the processing loop.
     """
-    def __init__(self, *args):
-        self.args = args
+    def __init__(self, **kwargs):
+        self.KWArgs = kwargs
 
     def do_action(self, sim, agent):
         """
@@ -171,8 +165,8 @@ class ActionDataRequest(Action):
     """
     Request data for the Entity (for later Actions
     """
-    def __init__(self, name, *args):
-        super().__init__(*args)
+    def __init__(self, name, **kwargs):
+        super().__init__(**kwargs)
         self.Name = name
 
 
@@ -180,8 +174,8 @@ class ActionCallback(Action):
     """
     Request calling another callback (for multi-stage actions).
     """
-    def __init__(self, callback, *args):
-        super().__init__(*args)
+    def __init__(self, callback, **kwargs):
+        super().__init__(**kwargs)
         self.Callback = callback
 
     def do_action(self, sim, agent):
@@ -193,18 +187,18 @@ class ActionCallback(Action):
         :param agent:
         :return:
         """
-        self.Callback(agent, *self.args)
+        self.Callback(agent, **self.KWArgs)
 
 
 class ActionQueueEventWithDelay(Action):
     """
     Put an Event with a delay into the simulation event queue.
     """
-    def __init__(self, callback, delay, *args):
-        super().__init__(*args)
+    def __init__(self, callback, delay, **kwargs):
+        super().__init__(**kwargs)
         self.callback = callback
         self.delay = delay
-        self.args = args
+        self.KWArgs = kwargs
 
     def do_action(self, sim, agent):
         """
@@ -214,18 +208,18 @@ class ActionQueueEventWithDelay(Action):
         :param agent: Agent
         :return:
         """
-        sim.queue_event_delay(agent.GID, self.callback, self.delay, *self.args)
+        sim.queue_event_delay(agent.GID, self.callback, self.delay, **self.KWArgs)
 
 class ActionQueueActionEventWithDelay(Action):
     """
     Put an ActionEvent with a delay into the simulation event queue.
     """
-    def __init__(self, callback, delay, data_dict, *args):
-        super().__init__(*args)
+    def __init__(self, callback, delay, data_dict, **kwargs):
+        super().__init__(**kwargs)
         self.callback = callback
         self.delay = delay
-        self.data_dict = data_dict
-        self.args = args
+        self.data_dict = ActionDataRequestHolder(data_dict)
+        self.KWArgs = kwargs
 
     def do_action(self, sim, agent):
         """

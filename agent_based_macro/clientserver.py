@@ -12,30 +12,30 @@ import time
 
 
 class ClientServerMsg(object):
-    def __init__(self, *args):
+    def __init__(self, **kwargs):
         """
         Create the object with the arguments to be passed to the callback.
         :param args: whatever...
         """
-        self.args = args
+        self.KWArgs = kwargs
         self.ClientID = None
 
-    def server_command(self, server, *args):
+    def server_command(self, server, **kwargs):
         """The server will call this to execute the command"""
         pass
 
-    def client_message(self, client, *args):
+    def client_message(self, client, **kwargs):
         """The client will call this to get the message payload."""
         pass
 
 
 class MsgPause(ClientServerMsg):
-    def server_command(self, server, *args):
+    def server_command(self, server, **kwargs):
         server.IsPaused = True
 
 
 class MsgUnpause(ClientServerMsg):
-    def server_command(self, server, *args):
+    def server_command(self, server, **kwargs):
         # Do nothing if unpaused
         if not server.IsPaused:
             return
@@ -44,13 +44,13 @@ class MsgUnpause(ClientServerMsg):
 
 
 class MsgTimeQuery(ClientServerMsg):
-    def server_command(self, server, *args):
-        response = MsgTimeQuery(server.IsPaused, server.Time)
+    def server_command(self, server, **kwargs):
+        response = MsgTimeQuery(is_paused=server.IsPaused, ttime=server.Time)
         response.ClientID = self.ClientID
         server.queue_message(response)
 
-    def client_message(self, client, ispaused, ttime):
+    def client_message(self, client, **kwargs):
         # ispaused, ttime = self.args
-        client.IsPaused = ispaused
-        client.Time = ttime
+        client.IsPaused = kwargs['is_paused']
+        client.Time = kwargs['ttime']
         client.LastResponseMonotonic = time.monotonic()
