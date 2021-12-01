@@ -55,10 +55,10 @@ class ProducerLabour(ProductionAgent):
         self.IsEmployer = True
 
     def register_events(self):
-        hiring_event = simulation.ActionEvent(self.GID, self.event_hiring, .05, 1.)
+        hiring_event = simulation.Event(self.GID, self.event_hiring, .05, 1.)
         hiring_event.add_data_request('JG_Wage', request='JG_Wage')
-        production_event = simulation.ActionEvent(self.GID, self.event_production, .5, 1.)
-        sales_event = simulation.ActionEvent(self.GID, self.event_sales, .75, 1.)
+        production_event = simulation.Event(self.GID, self.event_production, .5, 1.)
+        sales_event = simulation.Event(self.GID, self.event_sales, .75, 1.)
         sales_event.add_data_request('Productivity', request="Productivity", commodity='Fud')
         sales_event.add_data_request('FudID', request='CommodityID', commodity='Fud')
         return [(hiring_event, (0., 0.2)),
@@ -245,8 +245,8 @@ class JobGuarantee(ProductionAgent):
 
         :return: list
         """
-        payment_event = simulation.ActionEvent(self.GID, self.event_production, 0.02, 1.)
-        labour_event = simulation.ActionEvent(self.GID, self.event_labour_market, 0., 1.)
+        payment_event = simulation.Event(self.GID, self.event_production, 0.02, 1.)
+        labour_event = simulation.Event(self.GID, self.event_labour_market, 0., 1.)
         return [(payment_event, (0.04, 0.1)),
                 (labour_event, (0., .038)),]
 
@@ -323,7 +323,7 @@ class JobGuarantee(ProductionAgent):
         (ii) ProductionLabour
         (iii) DelayEvent - call event_set_orders() with a delay.
 
-        (Note: Will need to create a DelayEvent as an ActionEvent.
+        (Note: Will need to create a DelayEvent as an Event.
 
         :param args:
         :return:
@@ -341,7 +341,7 @@ class JobGuarantee(ProductionAgent):
             'Productivity': {'request': 'Productivity', 'commodity': 'Fud'},
             'FudID': {'request': 'CommodityID', 'commodity': 'Fud'}
         }
-        self.add_action(action_type='QueueActionEventWithDelay', call_back=self.event_set_orders, delay=.1,
+        self.add_action(action_type='QueueEventWithDelay', call_back=self.event_set_orders, delay=.1,
                         input_data_dict=data_queries)
 
     def event_set_orders(self, *args):

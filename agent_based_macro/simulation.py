@@ -88,6 +88,7 @@ class Event(object):
         # I.e., if repeat = 1, repeat daily.
         self.Repeat = repeat
         self.KWArgs = kwargs
+        self.DataRequests = ActionDataRequestHolder()
 
     def __lt__(self, other):
         return self.CallTime < other.CallTime
@@ -104,6 +105,14 @@ class Event(object):
         # args = self.args
         return self.Callback(**self.KWArgs)
 
+    def add_data_request(self, name, **kwargs):
+        """
+        Add a data request that will have data stored under "name"
+        :param name: str
+        :return:
+        """
+        self.DataRequests.add_request(name, kwargs)
+
 
 def queue_event(event):
     """
@@ -115,28 +124,6 @@ def queue_event(event):
     :return:
     """
     insort_right(Simulation.EventList, event)
-
-
-class ActionEvent(Event):
-    """
-    An ActionEvent is a type of Event that is treated specially.
-
-    (1) A list of requested data is specified in the ActionEvent. The simulation will
-    fetch the requested data.
-    (2) The action
-
-    """
-    def __init__(self, gid, callback, calltime, repeat, **kwargs):
-        super().__init__(gid, callback, calltime, repeat, **kwargs)
-        self.DataRequests = ActionDataRequestHolder()
-
-    def add_data_request(self, name, **kwargs):
-        """
-        Add a data request that will have data stored under "name"
-        :param name: str
-        :return:
-        """
-        self.DataRequests.add_request(name, kwargs)
 
 
 class Client(object):
@@ -242,9 +229,10 @@ class Simulation(ABC, Entity):
             event.CallTime = actual_time
             queue_event(event)
 
-    def queue_event_delay(self, gid, action, delay, **kwargs):
+    def queue_event_delay(self, gid, action, delay, data_requests=None, **kwargs):
         """
         Queue an event with a delay versus current time. Does not repeat.
+        :param data_requests: ActionDataRequestHolder
         :param gid: int
         :param action:
         :param delay: int
@@ -252,10 +240,6 @@ class Simulation(ABC, Entity):
         :return:
         """
         event = Event(gid, action, self.Time + delay, None, **kwargs)
-        queue_event(event)
-
-    def queue_action_event_delay(self, gid, callback, delay, data_requests=None):
-        event = ActionEvent(gid, callback, self.Time + delay, repeat=None)
         if data_requests is not None:
             # Force data_requests to be an ActionDataRequestHolder, which allows a dict to be passed.
             event.DataRequests = ActionDataRequestHolder(data_requests)
@@ -285,10 +269,7 @@ class Simulation(ABC, Entity):
             if self.Time >= self.EventList[0].CallTime:
                 event = self.EventList.pop(0)
                 try:
-                    if isinstance(event, ActionEvent):
-                        self.process_action_event(event)
-                    else:
-                        event()
+                    self.process_event(event)
                 except EntityDoesNotExist:
                     # The Entity disappeared. Do nothing (so is no longer REPEATed).
                     # Return True, since we did have an Event in the queue.
@@ -307,13 +288,11 @@ class Simulation(ABC, Entity):
         # Return False if nothing happened.
         return False
 
-    def process_action_event(self, action_event):
+    def process_event(self, event):
         """
-        Special processing for an ActionEvent.
+        Event processing.
 
-        ActionEvents are handled differently that regular events.
-
-        (1) The ActionEvent specifies data to be gathered before calling the callback
+        (1) The Event specifies data to be gathered before calling the callback
         (2) The callback is called.
         (3) During the callback, the entity uses the gathered data, and fills in a queue of Actions
             (e.g,, transactions) that are to be undertaken.
@@ -322,20 +301,20 @@ class Simulation(ABC, Entity):
             and new ActionCallbacks. Those callbacks are then called. This can repeat up until
             self.MAxActionLimit Actions are performed (at which point, the assumption is that there is an error).
 
-        :param action_event: ActionEvent
+        :param event: Event
         :return:
         """
         # This can throw an error if the entity no longer exists, but it needs to be caught by Process() method.
-        ent: Entity = self.get_entity(action_event.GID)
+        ent: Entity = self.get_entity(event.GID)
         # Clear the action data members
         # Data that is requested before the callback
         ent.ActionData = {}
         # Actions requested by the Entity
         ent.ActionQueue = []
-        for name, data_args in action_event.DataRequests.DataDict.items():
+        for name, data_args in event.DataRequests.DataDict.items():
             ent.ActionData[name] = self.get_action_data(ent, **data_args)
         # Run the callback
-        action_event.Callback(**action_event.KWArgs)
+        event.Callback(**event.KWArgs)
         # Then, do the requested actions.
         cnt = 0
         while len(ent.ActionQueue) > 0:

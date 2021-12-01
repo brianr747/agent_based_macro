@@ -75,9 +75,9 @@ class Entity(object):
             self.ActionQueue.append(ActionDataRequest(**kwargs))
         elif action_type == 'Callback':
             self.ActionQueue.append(ActionCallback(**kwargs))
-        elif action_type == 'QueueEventWithDelay':
-            self.ActionQueue.append(ActionQueueEventWithDelay(**kwargs))
-        elif action_type == 'QueueActionEventWithDelay':
+        elif (action_type == 'QueueEventWithDelay') or (action_type=='QueueActionEventWithDelay'):
+            if action_type == 'QueueActionEventWithDelay':
+                print('DEPRECATED QueueActionEventWithDelay')
             # Create an ActionEVent that is delayed.
             call_back = kwargs.pop('call_back')
             delay = kwargs.pop('delay')
@@ -85,8 +85,8 @@ class Entity(object):
                 input_data_dict = kwargs.pop('input_data_dict')
             else:
                 input_data_dict = {}
-            self.ActionQueue.append(ActionQueueActionEventWithDelay(call_back, delay, input_data_dict,
-                                                                    **kwargs))
+            self.ActionQueue.append(ActionQueueEventWithDelay(call_back, delay, input_data_dict,
+                                                              **kwargs))
         else:
             # Generic Action to be handled by the Simulation subclass
             self.ActionQueue.append(Action(**kwargs))
@@ -207,26 +207,6 @@ class ActionQueueEventWithDelay(Action):
     """
     Put an Event with a delay into the simulation event queue.
     """
-    def __init__(self, callback, delay, **kwargs):
-        super().__init__(**kwargs)
-        self.callback = callback
-        self.delay = delay
-        self.KWArgs = kwargs
-
-    def do_action(self, sim, agent):
-        """
-        Call the Simulation queue_event_delay()
-
-        :param sim: Simulation
-        :param agent: Agent
-        :return:
-        """
-        sim.queue_event_delay(agent.GID, self.callback, self.delay, **self.KWArgs)
-
-class ActionQueueActionEventWithDelay(Action):
-    """
-    Put an ActionEvent with a delay into the simulation event queue.
-    """
     def __init__(self, callback, delay, data_dict, **kwargs):
         super().__init__(**kwargs)
         self.callback = callback
@@ -242,4 +222,4 @@ class ActionQueueActionEventWithDelay(Action):
         :param agent: Agent
         :return:
         """
-        sim.queue_action_event_delay(agent.GID, self.callback, self.delay, self.data_dict)
+        sim.queue_event_delay(agent.GID, self.callback, self.delay, self.data_dict)
