@@ -30,6 +30,7 @@ Copyright 2021 Brian Romanchuk
 import weakref
 
 from agent_based_macro.data_requests import ActionDataRequestHolder
+from agent_based_macro.errors import InvalidActionArguments
 
 lastGID = 0
 GEntityDict = weakref.WeakValueDictionary()
@@ -64,32 +65,16 @@ class Entity(object):
                 'Name': self.Name,
                 'Type': self.Type}
 
-    def add_action(self, **kwargs):
+    def add_action(self, action_type, **kwargs):
         """
-        Add an Action to the ActionQueue
-        :param args:
-        :return:
+
+        Add an Action to the ActionQueue. Arguments must be specified as keyword arguments.
+
+        :type action_type: str
         """
-        action_type=kwargs['action_type']
-        if action_type == 'DataRequest':
-            self.ActionQueue.append(ActionDataRequest(**kwargs))
-        elif action_type == 'Callback':
-            self.ActionQueue.append(ActionCallback(**kwargs))
-        elif (action_type == 'QueueEventWithDelay') or (action_type=='QueueActionEventWithDelay'):
-            if action_type == 'QueueActionEventWithDelay':
-                print('DEPRECATED QueueActionEventWithDelay')
-            # Create an ActionEVent that is delayed.
-            call_back = kwargs.pop('call_back')
-            delay = kwargs.pop('delay')
-            if 'input_data_dict' in kwargs:
-                input_data_dict = kwargs.pop('input_data_dict')
-            else:
-                input_data_dict = {}
-            self.ActionQueue.append(ActionQueueEventWithDelay(call_back, delay, input_data_dict,
-                                                              **kwargs))
-        else:
-            # Generic Action to be handled by the Simulation subclass
-            self.ActionQueue.append(Action(**kwargs))
+        kwargs['action_type'] = action_type
+        self.ActionQueue.append(Action(**kwargs))
+
 
     @staticmethod
     def get_entity(gid):
@@ -151,36 +136,83 @@ def reset_entities():
 class Action(object):
     """
     Actions that are requested by Entities during the processing loop.
+
+    For a generic Action, need to specify arguments as KeyWord arguments, with action_type used to handle the
+    callback.
     """
+    # List of requires fields by action_type
+    GRequired = {}
+    # Global holds the handlers by action_type
+    GHandlers = {}
+    # Docstrings for Actions
+    GDocStrings = {}
+
     def __init__(self, **kwargs):
         self.KWArgs = kwargs
+        self.check_valid()
 
     def do_action(self, sim, agent):
         """
-        A method that may be overridden by subclasses to implement actions.
+        DEPRECATED. Implementation is now within the Simulation subclass (or external handlers that are
+        patched in). Leaving this for now...
 
-        If not overridden, the Simulation class has to have a handler for the Action.args.
 
-        For simpler simulations, it may be easier to have the Simulation deal with the
-        action implementation. However, as the number of Action types rises, pushing the
-        code to subclasses of Action will be more modular. It will also allow users to
-        more easily hook modifications into existing classes, since they just create
-        a new Action and handler, and do not need to touch the core classes.
-
-        :param sim: Simulation
-        :param agent: Agent
         :return:
         """
         raise NotImplementedError('do_action() not implemented in this class')
 
+    def check_valid(self):
+        """
+        Does the Action have the required arguments?
+        :return:
+        """
+        try:
+            action_type = self.KWArgs['action_type']
+        except KeyError:
+            raise InvalidActionArguments('Action arguments must include action_type variable')
+        try:
+            required = Action.GRequired[action_type]
+        except KeyError:
+            raise InvalidActionArguments(f'action_type "{action_type}" is not registered')
+        for arg in required:
+            if arg not in self.KWArgs:
+                raise InvalidActionArguments(f'missing required argument {arg} for Action {action_type}')
+
+
+    @staticmethod
+    def add_action_type(action_type, handler, required, docstring=''):
+        """
+
+        :param action_type: str
+        :param handler: function
+        :param required: str
+        :param docstring: str
+        :return:
+        """
+        show_warning = action_type in Action.GRequired
+        Action.GRequired[action_type] = required
+        Action.GHandlers[action_type] = handler
+        Action.GDocStrings[action_type] = docstring
+        if show_warning:
+            # This might be upgraded to an error..
+            raise Warning(f'action_type {action_type} was overwritten')
+
+
 
 class ActionDataRequest(Action):
     """
-    Request data for the Entity (for later Actions
+    Request data for the Entity
     """
-    def __init__(self, name, **kwargs):
+    def __init__(self, data_request=None, **kwargs):
         super().__init__(**kwargs)
-        self.Name = name
+        self.DataRequest = ActionDataRequestHolder(data_request)
+
+    def do_action(self, sim, agent):
+        raise NotImplementedError('Need to figure out how data request works')
+
+    def check_valid(self):
+        'Always valid if constructor does not blow up'
+        pass
 
 
 class ActionCallback(Action):
@@ -201,6 +233,10 @@ class ActionCallback(Action):
         :return:
         """
         self.Callback(agent, **self.KWArgs)
+
+    def check_valid(self):
+        'Always valid if constructor does not blow up'
+        pass
 
 
 class ActionQueueEventWithDelay(Action):
@@ -223,3 +259,7 @@ class ActionQueueEventWithDelay(Action):
         :return:
         """
         sim.queue_event_delay(agent.GID, self.callback, self.delay, self.data_dict)
+
+    def check_valid(self):
+        'always valid if constructor runs'
+        pass

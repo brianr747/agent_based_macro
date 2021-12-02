@@ -55,7 +55,7 @@ from abc import ABC, abstractmethod
 
 import agent_based_macro.entity
 import agent_based_macro.utils as utils
-from agent_based_macro.entity import EntityDoesNotExist, EntityDead, Entity, reset_entities, ActionDataRequest
+from agent_based_macro.entity import EntityDoesNotExist, EntityDead, Entity, reset_entities, ActionDataRequest, Action
 from agent_based_macro.data_requests import ActionDataRequestHolder
 
 GSimulation = None
@@ -201,6 +201,15 @@ class Simulation(ABC, Entity):
         # Allow for a variable number of logs that have some central management
         self.LogDict = {}
         self.SeriesFileName = None
+        self.register_actions()
+
+    def register_actions(self):
+        """
+        Subclasses should call super-class register_action() as well
+        :return:
+        """
+        Action.add_action_type('QueueEventWithDelay', Simulation.action_queue_event_delay,
+                               ('GID', 'callback', 'delay', 'data_requests'), 'Add event with delay')
 
     def add_entity(self, entity):
         """
@@ -229,17 +238,34 @@ class Simulation(ABC, Entity):
             event.CallTime = actual_time
             queue_event(event)
 
-    def queue_event_delay(self, gid, action, delay, data_requests=None, **kwargs):
+    def action_queue_event_delay(self, agent, **kwargs):
+        """
+        The Action that calls queue_event_delay.
+
+        Need to strip out the arguments gid, callback, delay, data_requests from kwargs.
+        :param agent: Agent
+        :param kwargs: dict
+        :return:
+        """
+        # Need to remove action_type from kwargs, since it will be passed into the Event()
+        kwargs.pop('action_type')
+        GID = kwargs.pop('GID')
+        callback = kwargs.pop('callback')
+        delay = kwargs.pop('delay')
+        data_requests = kwargs.pop('data_requests')
+        self.queue_event_delay(GID, callback, delay, data_requests, **kwargs)
+
+    def queue_event_delay(self, gid, callback, delay, data_requests=None, **kwargs):
         """
         Queue an event with a delay versus current time. Does not repeat.
         :param data_requests: ActionDataRequestHolder
         :param gid: int
-        :param action:
+        :param callback:
         :param delay: int
         :param args:
         :return:
         """
-        event = Event(gid, action, self.Time + delay, None, **kwargs)
+        event = Event(gid, callback, self.Time + delay, None, **kwargs)
         if data_requests is not None:
             # Force data_requests to be an ActionDataRequestHolder, which allows a dict to be passed.
             event.DataRequests = ActionDataRequestHolder(data_requests)
@@ -306,7 +332,7 @@ class Simulation(ABC, Entity):
         """
         # This can throw an error if the entity no longer exists, but it needs to be caught by Process() method.
         ent: Entity = self.get_entity(event.GID)
-        # Clear the action data members
+        # Clear the callback data members
         # Data that is requested before the callback
         ent.ActionData = {}
         # Actions requested by the Entity
@@ -323,19 +349,12 @@ class Simulation(ABC, Entity):
                 # Enforce a limit in case an infinite recursion is hit
                 raise ValueError(f'Entity spawned more than {self.MaxActionLimit} Actions!')
             action = ent.ActionQueue.pop(0)
-            try:
-                action.do_action(self, ent)
-            except NotImplementedError:
-                # Simulation-level action handlers for data, or whatever else.
-                if isinstance(action, ActionDataRequest):
-                    ent.ActionData[action.Name] = self.get_action_data(ent, **action.args)
-                else:
-                    self.process_action(ent, action)
+            handler = Action.GHandlers[action.KWArgs['action_type']]
+            handler(self, ent, **action.KWArgs)
 
-    @abstractmethod
     def process_action(self, agent, action):
         """
-        Subclass simulations need to deal with simulation-specific actions.
+        DEPRECATED
 
         :param action: Action
         :param agent: Agent

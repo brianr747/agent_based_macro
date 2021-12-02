@@ -341,8 +341,8 @@ class JobGuarantee(ProductionAgent):
             'Productivity': {'request': 'Productivity', 'commodity': 'Fud'},
             'FudID': {'request': 'CommodityID', 'commodity': 'Fud'}
         }
-        self.add_action(action_type='QueueEventWithDelay', call_back=self.event_set_orders, delay=.1,
-                        input_data_dict=data_queries)
+        self.add_action(action_type='QueueEventWithDelay', GID=self.GID, callback=self.event_set_orders, delay=.1,
+                        data_requests=data_queries)
 
     def event_set_orders(self, *args):
         """

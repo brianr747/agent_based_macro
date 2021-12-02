@@ -41,3 +41,6 @@ class CommodityReserveError(SimulationError):
     Attempting to reserve more commodity than exists
     """
     pass
+
+class InvalidActionArguments(ValueError):
+    pass

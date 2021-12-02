@@ -1,17 +1,26 @@
 # agent_based_macro
-Simple Agent-Based Macro Model
 
-This is extremely preliminary. I am putting this up here to give myself a backup.
+##Simple Agent-Based Macro Model
 
-There are design notes in the project file, but they are somewhwat rambling theorycrafting
-for my own purposes. It is possible that I will drop working on this project, and those
-notes are to allow me to get back into the design.
+This module now supports a very basic economic model. See my *space_trader* project for
+a model implementation. Once I am satisfied with the first model, I will migrate it to this
+project and set it up so that this project can be run by itself.
 
-Note that this project by itself is just core simulation classes, and they are not tied together
-into a simulation. That is being done in the separate "spacetrader" project. 
+Until this project reaches some form of stability, updates (and initial documentation) will 
+show up on my Patreon: https://www.patreon.com/brianromanchuk?fan_landing=true
 
-Go to the "spacetrader" project to see an example of how a simulation is tied together.
-If I get it to work, the simulation part might migrate back into this project so that
-this project makes sense as a stand-alone entity. 
+##Overview
 
-Will fill in more details if this works...
+As the name suggests, this framework is used to implement agent-based macro models. The 
+design includes agents that represent individual economic actors (mainly firms) as well as
+agents that are in fact economic aggregates (such as the Household sector).
+
+The design is aimed to support a client-server architecture, although the code currently runs 
+inside a single process for simplicity during the initial design phase. It will take some
+refactoring to add in client-server support.
+
+The development plan was to build something as quick as possible that works, then switch to 
+code cleanup. That initial build-out was completed, and now the objective is to clean up
+code and keep it relatively clean as features are added.
+
+

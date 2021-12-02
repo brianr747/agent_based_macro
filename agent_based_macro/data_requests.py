@@ -2,7 +2,7 @@
 data_requests.py
 
 This file generates the ActionDataRequestHolder class. As the name suggests, it holds the information for a data request
-for an action.
+for an callback.
 
 The class ensures that all required parameters are filled in when the request is created.
 

@@ -44,7 +44,7 @@ import math
 
 import agent_based_macro.entity
 from agent_based_macro import errors
-from agent_based_macro.entity import Entity
+from agent_based_macro.entity import Entity, Action
 from agent_based_macro.orders import SellOrder, BuyOrder, MarketBase, OrderType
 from agent_based_macro.errors import NoMoneyError, NoFreeMoneyError, ReserveError
 import agent_based_macro.simulation as simulation
@@ -101,7 +101,6 @@ class Planet(Location):
         info = super().get_representation()
         info['Coordinates'] = self.Coordinates
         return info
-
 
 
 class ReserveType(enum.Enum):
@@ -198,7 +197,7 @@ class Inventory(object):
         return self.Commodities[item]
 
     def get_representation_info(self):
-        out = [(x, y.Amount, y.Cost) for x,y in self.Commodities.items()]
+        out = [(x, y.Amount, y.Cost) for x, y in self.Commodities.items()]
         return out
 
 
@@ -415,14 +414,13 @@ class Agent(agent_based_macro.entity.Entity):
         """
         # Switch to match when I install Python 10...
         if operation == 'add':
-            self.change_reserves(amount*price, reserve_type=ReserveType.ORDERS)
+            self.change_reserves(amount * price, reserve_type=ReserveType.ORDERS)
         elif operation == 'fill':
-            self.buy_goods(commodity_id, amount, amount*price)
+            self.buy_goods(commodity_id, amount, amount * price)
         elif operation == 'remove':
-            self.change_reserves(-amount*price, reserve_type=ReserveType.ORDERS)
+            self.change_reserves(-amount * price, reserve_type=ReserveType.ORDERS)
         else:
             raise ValueError(f'unknown operation: {operation}')
-
 
     def do_accounting_sell(self, operation, amount, price, commodity_id):
         """
@@ -437,7 +435,7 @@ class Agent(agent_based_macro.entity.Entity):
         if operation == 'add':
             self.Inventory[commodity_id].change_reserves(amount)
         elif operation == 'fill':
-            self.sell_goods(commodity_id, amount, amount*price)
+            self.sell_goods(commodity_id, amount, amount * price)
         elif operation == 'remove':
             self.Inventory[commodity_id].change_reserves(-amount)
         else:
@@ -463,11 +461,13 @@ class Agent(agent_based_macro.entity.Entity):
     def get_info(self):
         return f'{self.GID}'
 
+
 class ProductionAgent(Agent):
     """
     An agent that has production capacity
     """
-    def __init__(self, name,  money_balance=0, location_id=None):
+
+    def __init__(self, name, money_balance=0, location_id=None):
         super().__init__(name, money_balance=money_balance, location_id=location_id)
         self.ProductivityMultiplier = 1.
 
@@ -482,7 +482,7 @@ class ProductionAgent(Agent):
         """
         loc = agent_based_macro.entity.Entity.get_entity(self.LocationID)
         base_productivity = loc.ProductivityDict[commodity_id]
-        productivity = self.ProductivityMultiplier*base_productivity
+        productivity = self.ProductivityMultiplier * base_productivity
         return productivity
 
     def get_daily_production(self, commodity_id):
@@ -499,7 +499,7 @@ class ProductionAgent(Agent):
         """
         productivity = self.get_productivity(commodity_id)
 
-        return int(productivity*float(self.WorkersActual))
+        return int(productivity * float(self.WorkersActual))
 
     def unit_cost(self, commodity_id):
         """
@@ -601,9 +601,9 @@ class HouseholdSector(Agent):
             # This would imply negative spending.
             # Make the spending at least 50% of daily_spend.
             # Eventually, self.Money will catch up to TargetMoney.
-            targ_spend = max(targ_spend, 0.5*daily_spend)
+            targ_spend = max(targ_spend, 0.5 * daily_spend)
             amount = math.floor(targ_spend / bid_price)
-            self.time_series_set('DailyBid', amount*bid_price)
+            self.time_series_set('DailyBid', amount * bid_price)
             if amount > 0:
                 order = BuyOrder(bid_price, amount, self.GID)
                 market.add_named_buy(agent=self, name='DailyBid', order=order)
@@ -638,7 +638,7 @@ class HouseholdSector(Agent):
         if amount < 1:
             return
         order = BuyOrder(price, amount, self.GID)
-        self.time_series_set('MarketOrder', price*amount)
+        self.time_series_set('MarketOrder', price * amount)
         market.add_named_buy(agent=self, name='"MarketOrder"', order=order)
 
 
@@ -651,7 +651,6 @@ class Market(agent_based_macro.entity.Entity, MarketBase):
         # Since the market will always be calling the Simulation to log transactions, embed a reference to
         # the Simulation inside the Market.
         self.Simulation = simulation.get_simulation()
-
 
     def get_time(self):
         """
@@ -675,7 +674,7 @@ class Market(agent_based_macro.entity.Entity, MarketBase):
         :param price: int
         :return:
         """
-        agent : Agent = Entity.get_entity(firm_gid)
+        agent: Agent = Entity.get_entity(firm_gid)
         agent.do_accounting(order_type, operation, amount, price, self.CommodityID)
 
     def add_named_buy(self, agent, name, order):
@@ -798,6 +797,20 @@ class BaseSimulation(simulation.Simulation):
                 return
             gov.Money -= entity.Money
 
+    def register_actions(self):
+        super(BaseSimulation, self).register_actions()
+        Action.add_action_type('PayWages', BaseSimulation.process_action, ('payment',), '')
+        Action.add_action_type('ProductionLabour', BaseSimulation.process_action, ('commodity', 'num_workers',
+                                                                                   'payment',), '')
+        Action.add_action_type('AddNamedBuy', BaseSimulation.process_action, ('name', 'commodity_id',
+                                                                              'price', 'amount'), '')
+        Action.add_action_type('AddNamedSell', BaseSimulation.process_action, ('name', 'commodity_id',
+                                                                               'price', 'amount'), '')
+        Action.add_action_type('BuyNoKeep', BaseSimulation.process_action, ('commodity_id',
+                                                                            'price', 'amount'), '')
+        Action.add_action_type('SellNoKeep', BaseSimulation.process_action, ('commodity_id',
+                                                                             'price', 'amount'), '')
+
     def add_location(self, location):
         self.add_entity(location)
         self.Locations.append(location.GID)
@@ -884,54 +897,49 @@ class BaseSimulation(simulation.Simulation):
             return JG.Wage
         raise ValueError(f'Unhandled Data Request: {kwargs["request"]}')
 
-    def process_action(self, agent, action):
+    def process_action(self, agent, **kwargs):
         """
-        Handle custom actions (not data or callback actions)
+        Handle actions associated with this class.
 
-        For now, not creating custom Action subclasses, instead just parse the arguments.
-
-        Supported generic Action arguments:
-
-        'PayWages', <amount>
-
+        This is a clumsy architecture - will split into individual handlers.
 
         :param agent: Agent
         :param action: Action
         :return:
         """
         # Switch to match for Python 3.10
-        if action.KWArgs['action_type'] == 'PayWages':
+        if kwargs['action_type'] == 'PayWages':
             # We assume that there is only a single aggregated Household to get all wages.
             household_id = self.Households[agent.LocationID]
             household: HouseholdSector = agent_based_macro.entity.Entity.get_entity(household_id)
-            amount = int(action.KWArgs['payment'])
+            amount = int(kwargs['payment'])
             agent.spend_money(amount=amount)
             household.receive_wages(amount=amount)
-        elif action.KWArgs['action_type'] == 'ProductionLabour':
-            commodity = action.KWArgs['commodity']
-            num_workers = action.KWArgs['num_workers']
-            payment = action.KWArgs['payment']
+        elif kwargs['action_type'] == 'ProductionLabour':
+            commodity = kwargs['commodity']
+            num_workers = kwargs['num_workers']
+            payment = kwargs['payment']
             self.action_production_labour(agent, commodity, num_workers, payment)
-        elif action.KWArgs['action_type'] == 'AddNamedBuy':
-            name = action.KWArgs['name']
-            commodity_id = action.KWArgs['commodity_id']
-            price = action.KWArgs['price']
-            amount = action.KWArgs['amount']
+        elif kwargs['action_type'] == 'AddNamedBuy':
+            name = kwargs['name']
+            commodity_id = kwargs['commodity_id']
+            price = kwargs['price']
+            amount = kwargs['amount']
             market = self.get_market(agent.LocationID, commodity_id)
             order = BuyOrder(price, amount, agent.GID)
             market.add_named_buy(agent, name, order)
-        elif action.KWArgs['action_type'] == 'AddNamedSell':
-            name = action.KWArgs['name']
-            commodity_id = action.KWArgs['commodity_id']
-            price = action.KWArgs['price']
-            amount = action.KWArgs['amount']
+        elif kwargs['action_type'] == 'AddNamedSell':
+            name = kwargs['name']
+            commodity_id = kwargs['commodity_id']
+            price = kwargs['price']
+            amount = kwargs['amount']
             market = self.get_market(agent.LocationID, commodity_id)
             order = SellOrder(price, amount, agent.GID)
             market.add_named_sell(agent, name, order)
-        elif action.KWArgs['action_type'] == 'BuyNoKeep':
-            commodity_id = action.KWArgs['commodity_id']
-            price = action.KWArgs['price']
-            amount = action.KWArgs['amount']
+        elif kwargs['action_type'] == 'BuyNoKeep':
+            commodity_id = kwargs['commodity_id']
+            price = kwargs['price']
+            amount = kwargs['amount']
             market = self.get_market(agent.LocationID, commodity_id)
             order = BuyOrder(price, amount, agent.GID)
             order.KeepInQueue = False
@@ -944,10 +952,10 @@ class BaseSimulation(simulation.Simulation):
                     simulation.queue_event(event)
                 else:
                     raise
-        elif action.KWArgs['action_type'] == 'SellNoKeep':
-            commodity_id = action.KWArgs['commodity_id']
-            price = action.KWArgs['price']
-            amount = action.KWArgs['amount']
+        elif kwargs['action_type'] == 'SellNoKeep':
+            commodity_id = kwargs['commodity_id']
+            price = kwargs['price']
+            amount = kwargs['amount']
             market = self.get_market(agent.LocationID, commodity_id)
             order = SellOrder(price, amount, agent.GID)
             order.KeepInQueue = False
@@ -961,7 +969,8 @@ class BaseSimulation(simulation.Simulation):
                 else:
                     raise
         else:
-            raise ValueError(f'Unknown Action arguments: {action.KWArgs}')
+            # NOTE: Should not reach this point.
+            raise ValueError(f'Unknown Action arguments: {kwargs}')
 
     def action_production_labour(self, agent, commodity, num_workers, payment):
         """
@@ -1007,4 +1016,3 @@ class BaseSimulation(simulation.Simulation):
 
     def event_send_invalid_action(self, *args):
         raise ValueError('bink')
-
