@@ -1,6 +1,6 @@
 # agent_based_macro
 
-##Simple Agent-Based Macro Model
+#Simple Agent-Based Macro Model
 
 This module now supports a very basic economic model. See my *space_trader* project for
 a model implementation. Once I am satisfied with the first model, I will migrate it to this
@@ -8,8 +8,9 @@ project and set it up so that this project can be run by itself.
 
 Until this project reaches some form of stability, updates (and initial documentation) will 
 show up on my Patreon: https://www.patreon.com/brianromanchuk?fan_landing=true
+(Note that a lot of updates and design discussions are not paywalled.)
 
-##Overview
+#Overview
 
 As the name suggests, this framework is used to implement agent-based macro models. The 
 design includes agents that represent individual economic actors (mainly firms) as well as

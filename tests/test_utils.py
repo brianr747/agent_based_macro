@@ -1,6 +1,7 @@
 from unittest import TestCase
 
 import agent_based_macro.utils as utils
+from agent_based_macro.utils import KwargManager
 
 
 class Test(TestCase):
@@ -51,12 +52,12 @@ class TestTimeSeries(TestCase):
     def test_init_1(self):
         # Basic case - should initialise with one entry.
         obj = utils.TimeSeries(freq=1., fill=0.)
-        self.assertEqual(obj.Data, [0.]*utils.TimeSeries.ChunkSize)
+        self.assertEqual(obj.Data, [0.] * utils.TimeSeries.ChunkSize)
 
     def test_init_2(self):
-        obj = utils.TimeSeries(freq=1., fill= None)
+        obj = utils.TimeSeries(freq=1., fill=None)
         # Should initialise with two entries
-        self.assertEqual(obj.Data, [None]*utils.TimeSeries.ChunkSize)
+        self.assertEqual(obj.Data, [None] * utils.TimeSeries.ChunkSize)
 
     def test_set_1(self):
         utils.TimeSeries.ChunkSize = 4
@@ -94,12 +95,11 @@ class TestTimeSeries(TestCase):
         # Time 0., .1, .2 all map to first entry
         obj.add(1., time=0.1)
         self.assertEqual(obj.Data[0], 1.)
-        obj.add(2., time = .2)
+        obj.add(2., time=.2)
         self.assertEqual(3., obj.Data[0])
         utils.TimeSeries.Time = 0.
         obj.add(3.)
         self.assertEqual(6., obj.Data[0])
-
 
     def test_iadd(self):
         obj = utils.TimeSeries(fill=None, freq=1.)
@@ -138,14 +138,70 @@ class TestTimeSeries(TestCase):
         # Should not grow
         self.assertEqual(chunk, len(obj.Data))
 
-
     def test_negative_time(self):
         obj = utils.TimeSeries()
         # obj.Get(-1.)
         self.assertRaises(ValueError, obj.get, -.1)
 
 
+# Create a dummy KwargManager subclass to run tests on.
 
+class DummyKeywordError(utils.BadKeywordError):
+    pass
+
+
+class DummyKwargManager(KwargManager):
+    GRequired = {}
+    GKey = 'testkey'
+    GDocstrings = {}
+    ErrorType = DummyKeywordError
+
+    @staticmethod
+    def reset_entries():
+        'call this on unit tests to undo effect of other tests'
+        DummyKwargManager.GRequired = {}
+        DummyKwargManager.GDocstrings = {}
+        DummyKwargManager.GKey = 'testkey'
+
+class TestKwargManager(TestCase):
+    def test_empty_init(self):
+        DummyKwargManager()
+
+    def test_bad_int(self):
+        try:
+            DummyKwargManager(foo='1')
+            self.fail('should have thrown an exception')
+        except DummyKeywordError:
+            pass
+
+    def test_missing(self):
+        # If I read the docs, I think I could have the framework call reset_entries() before every test
+        DummyKwargManager.reset_entries()
+        try:
+            DummyKwargManager(testkey='cat')
+            self.fail('should have thrown an exception')
+        except DummyKeywordError:
+            pass
+
+    def test_missing_argument(self):
+        DummyKwargManager.reset_entries()
+        obj = DummyKwargManager()
+        obj.register_entry('test1', ('x',))
+        obj = DummyKwargManager(testkey='test1', x=2)
+        self.assertEqual(obj.KWArgs, {'x': 2})
+        try:
+            DummyKwargManager(testkey='test2', y=3)
+            self.fail('should have thrown an exception')
+        except DummyKeywordError:
+            pass
+
+    def test_2(self):
+        DummyKwargManager.reset_entries()
+        dobj = DummyKwargManager()
+        dobj.register_entry('test2', ('x', 'y'))
+        obj = DummyKwargManager(testkey='test2', x=1, y=2)
+        self.assertDictEqual(obj.KWArgs, {'x': 1, 'y': 2})
+        self.assertEqual(obj.ObjectType, 'test2')
 
 
 

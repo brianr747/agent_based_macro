@@ -162,3 +162,72 @@ class TimeSeries(object):
             return self.FillValue
         else:
             return self.Data[idx]
+
+
+class BadKeywordError(ValueError):
+    pass
+
+
+class KwargManager(object):
+    """
+    A base class for classes that manage objects that use **kwargs - Actions, Events, Messages.
+
+    For these classes, they have certain "types" of messages/actions/events/..., each with its own
+    keyword parameters. Each class has its own list.
+
+    The KwargManager creates a global list of accepted "types" and their associated arguments. The object
+    will throw an exception if arguments are missing.
+
+    The list of accepted "types" is registered during program startup. Extensions just make their additions
+    after the base code registers its entries.
+
+    The advantage of doing it this way:
+    1) Errors immediately thrown if objects are created with missing arguments. Since this would normally
+    only be found out when the object is unpacked, it is a lot easier to find the code that created the
+    problem.
+    2) Global registry of actions that can be compared to the non-existent documentation.
+    3) Can identify if the same keyword is used twice.
+
+    Note: subclasses need their own copies of the static class members. Methods access the correct
+    static members by using type(self).<member>
+    """
+    GRequired = {}
+    GKey = 'type'
+    GDocstrings = {}
+    ErrorType = BadKeywordError
+
+    def __init__(self, **kwargs):
+        try:
+            self.ObjectType = kwargs.pop(type(self).GKey)
+        except KeyError:
+            # Allow empty objects; they would blow up on processing, but whatever
+            # Note: we need empty objects to not throw an exception so that we can add entries!
+            if len(kwargs.keys()) == 0:
+                self.ObjectType = None
+                self.KWArgs = {}
+                return
+            else:
+                raise type(self).ErrorType(f'Missing {type(self).GKey} in keywords: {kwargs}')
+        if self.ObjectType not in type(self).GRequired:
+            raise type(self).ErrorType(f'Missing required keyword {self.ObjectType} in {kwargs}')
+        self.KWArgs = kwargs
+
+    def register_entry(self, key_name, required, docstring=''):
+        """
+        Register a new type of entry. Need to do this on an object, so we know what class to insert the
+        new entry into.
+
+        :param key_name: str
+        :param required: tuple
+        :param docstring: str
+        :return:
+        """
+        if key_name in type(self).GRequired:
+            raise ValueError(f'key name {key_name} already registered for this class')
+        type(self).GRequired[key_name] = required
+        type(self).GDocstrings[key_name] = docstring
+
+    def get(self):
+        return self.ObjectType, self.KWArgs
+
+
