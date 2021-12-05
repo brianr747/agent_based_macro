@@ -148,13 +148,15 @@ class TravellingAgent(Agent):
                 out = [s + progress * (t - s) for s, t in zip(self.StartCoordinates, self.TargetCoordinates)]
                 return tuple(out)
 
-    def start_moving(self, new_target, ttime):
+    def event_start_moving(self, **kwargs):
         """
         Move to a new target (always a location, not an arbitrary point.
         :param new_target:
         :param ttime:
         :return:
         """
+        new_target = kwargs['new_target']
+        ttime = kwargs['ttime']
         coords = self.get_coordinates(ttime)
         self.StartLocID = self.LocationID
         self.StartTime = ttime

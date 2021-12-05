@@ -779,6 +779,7 @@ class BaseSimulation(simulation.Simulation):
         # For invalid actions for players, send a message to the client, otherwise throw an error.
         # Need to keep a list of Agents that are player-associated.
         self.PlayerGID = set()
+        self.register_keyword_events()
 
     def add_entity(self, entity):
         """
@@ -811,6 +812,15 @@ class BaseSimulation(simulation.Simulation):
                                                                             'price', 'amount'), '')
         Action.add_action_type('SellNoKeep', BaseSimulation.process_action, ('commodity_id',
                                                                              'price', 'amount'), '')
+
+
+    def register_keyword_events(self):
+        # Do not have handlers registered, since they are not used.
+        obj = simulation.Event(None, None, None, None)
+        obj.register_entry('buy', None, ('commodity_id', 'price', 'amount'))
+        obj.register_entry('sell', None, ('commodity_id', 'price', 'amount'))
+        obj.register_entry('move_ship', None, ('new_target', 'ttime'))
+
 
     def add_location(self, location):
         self.add_entity(location)

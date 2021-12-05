@@ -55,6 +55,8 @@ from abc import ABC, abstractmethod
 
 import agent_based_macro.entity
 import agent_based_macro.utils as utils
+from agent_based_macro.utils import KwargManager
+from agent_based_macro.errors import InvalidEventKeywordArguments
 from agent_based_macro.entity import EntityDoesNotExist, EntityDead, Entity, reset_entities, Action
 from agent_based_macro.data_requests import ActionDataRequestHolder
 
@@ -70,7 +72,7 @@ def get_simulation():
     return GSimulation
 
 
-class Event(object):
+class Event(KwargManager):
     """
     Event object.
 
@@ -79,15 +81,26 @@ class Event(object):
     Once popped, the entity with GID will have its method event_{Callback}(args) called.
 
     Use the Simulation GID for simulation-level events.
+
+    Subclassed from KwargManager. Most Events will not have keyword arguments (**kwargs) in their
+    constructor, but some might. Use the KwargManager to enforce the keywords.
+
+    Since the Event has its own callback member, does not use QwargManager.run()
     """
+    GRequired = {}
+    GKey = 'event_type'
+    GDocstrings = {}
+    GHandler = {}
+    ErrorType = InvalidEventKeywordArguments
+
     def __init__(self, gid, callback, calltime, repeat, **kwargs):
+        super().__init__(**kwargs)
         self.GID = gid
         self.Callback = callback
         self.CallTime = calltime
         # If None, does not repeat. Otherwise, framework will reinsert with the CallTime incremented by Repeat.
         # I.e., if repeat = 1, repeat daily.
         self.Repeat = repeat
-        self.KWArgs = kwargs
         self.DataRequests = []
 
     def __lt__(self, other):
@@ -103,7 +116,10 @@ class Event(object):
         entity = Entity.get_entity(self.GID)
         # meth = getattr(entity, f'event_{self.Action}')
         # args = self.args
-        return self.Callback(**self.KWArgs)
+        if len(self.KWArgs.keys()) > 0:
+            return self.Callback(self.ObjectType, **self.KWArgs)
+        else:
+            return self.Callback()
 
     def add_data_request(self, name, **kwargs):
         """
@@ -270,7 +286,6 @@ class Simulation(ABC, Entity):
         """
         event = Event(gid, callback, self.Time + delay, None, **kwargs)
         if data_requests is not None:
-            # Force data_requests to be an ActionDataRequestHolder, which allows a dict to be passed.
             event.DataRequests = data_requests
         queue_event(event)
 

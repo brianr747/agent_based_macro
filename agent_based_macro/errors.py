@@ -36,11 +36,17 @@ class ReserveError(SimulationError):
     """ Attempting to reduce reserve to a negative amount"""
     pass
 
+
 class CommodityReserveError(SimulationError):
     """
     Attempting to reserve more commodity than exists
     """
     pass
 
+
 class InvalidActionArguments(ValueError):
+    pass
+
+
+class InvalidEventKeywordArguments(ValueError):
     pass

@@ -209,8 +209,13 @@ class KwargManager(object):
                 return
             else:
                 raise type(self).ErrorType(f'Missing {type(self).GKey} in keywords: {kwargs}')
-        if self.ObjectType not in type(self).GRequired:
-            raise type(self).ErrorType(f'Missing required keyword {self.ObjectType} in {kwargs}')
+        try:
+            for req in type(self).GRequired[self.ObjectType]:
+                if req not in kwargs:
+                    raise type(self).ErrorType(f'Missing required field {req} in {kwargs}')
+        except KeyError:
+            raise type(self).ErrorType(f'Unknown type {self.ObjectType}')
+
         self.KWArgs = kwargs
 
     def register_entry(self, key_name, handler, required, docstring=''):
