@@ -55,7 +55,7 @@ from abc import ABC, abstractmethod
 
 import agent_based_macro.entity
 import agent_based_macro.utils as utils
-from agent_based_macro.entity import EntityDoesNotExist, EntityDead, Entity, reset_entities, ActionDataRequest, Action
+from agent_based_macro.entity import EntityDoesNotExist, EntityDead, Entity, reset_entities, Action
 from agent_based_macro.data_requests import ActionDataRequestHolder
 
 GSimulation = None
@@ -88,7 +88,7 @@ class Event(object):
         # I.e., if repeat = 1, repeat daily.
         self.Repeat = repeat
         self.KWArgs = kwargs
-        self.DataRequests = ActionDataRequestHolder()
+        self.DataRequests = []
 
     def __lt__(self, other):
         return self.CallTime < other.CallTime
@@ -111,7 +111,7 @@ class Event(object):
         :param name: str
         :return:
         """
-        self.DataRequests.add_request(name, kwargs)
+        self.DataRequests.append((name, ActionDataRequestHolder(**kwargs)))
 
 
 def queue_event(event):
@@ -238,21 +238,24 @@ class Simulation(ABC, Entity):
             event.CallTime = actual_time
             queue_event(event)
 
-    def action_queue_event_delay(self, agent, **kwargs):
+    def action_queue_event_delay(self, agent, action_type, **kwargs):
         """
         The Action that calls queue_event_delay.
 
         Need to strip out the arguments gid, callback, delay, data_requests from kwargs.
+        :param action_type: str
         :param agent: Agent
         :param kwargs: dict
         :return:
         """
         # Need to remove action_type from kwargs, since it will be passed into the Event()
-        kwargs.pop('action_type')
         GID = kwargs.pop('GID')
         callback = kwargs.pop('callback')
         delay = kwargs.pop('delay')
         data_requests = kwargs.pop('data_requests')
+        if type(data_requests) is dict:
+            list_form = data_requests.items()
+            data_requests = [(x[0], ActionDataRequestHolder(**x[1])) for x in list_form]
         self.queue_event_delay(GID, callback, delay, data_requests, **kwargs)
 
     def queue_event_delay(self, gid, callback, delay, data_requests=None, **kwargs):
@@ -268,7 +271,7 @@ class Simulation(ABC, Entity):
         event = Event(gid, callback, self.Time + delay, None, **kwargs)
         if data_requests is not None:
             # Force data_requests to be an ActionDataRequestHolder, which allows a dict to be passed.
-            event.DataRequests = ActionDataRequestHolder(data_requests)
+            event.DataRequests = data_requests
         queue_event(event)
 
     def get_entity(self, gid):
@@ -337,8 +340,9 @@ class Simulation(ABC, Entity):
         ent.ActionData = {}
         # Actions requested by the Entity
         ent.ActionQueue = []
-        for name, data_args in event.DataRequests.DataDict.items():
-            ent.ActionData[name] = self.get_action_data(ent, **data_args)
+        request: ActionDataRequestHolder
+        for name, request in event.DataRequests:
+            ent.ActionData[name] = request.run(self, ent)
         # Run the callback
         event.Callback(**event.KWArgs)
         # Then, do the requested actions.
@@ -349,27 +353,16 @@ class Simulation(ABC, Entity):
                 # Enforce a limit in case an infinite recursion is hit
                 raise ValueError(f'Entity spawned more than {self.MaxActionLimit} Actions!')
             action = ent.ActionQueue.pop(0)
-            handler = Action.GHandlers[action.KWArgs['action_type']]
-            handler(self, ent, **action.KWArgs)
-
-    def process_action(self, agent, action):
-        """
-        DEPRECATED
-
-        :param action: Action
-        :param agent: Agent
-        :return:
-        """
-        pass
+            action.run(self, ent)
 
     @abstractmethod
-    def get_action_data(self, agent, **kwargs):
+    def get_action_data(self, agent, request, **kwargs):
         """
         Function that needs to be overriden by subclasses to do data fetching. Each simulation will
         have to work out its own protocol.
 
+        :param request: str
         :param agent: Agent
-        :param args:
         :return: object
         """
         pass

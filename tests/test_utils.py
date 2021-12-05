@@ -154,6 +154,7 @@ class DummyKwargManager(KwargManager):
     GRequired = {}
     GKey = 'testkey'
     GDocstrings = {}
+    GHandler = {}
     ErrorType = DummyKeywordError
 
     @staticmethod
@@ -162,6 +163,18 @@ class DummyKwargManager(KwargManager):
         DummyKwargManager.GRequired = {}
         DummyKwargManager.GDocstrings = {}
         DummyKwargManager.GKey = 'testkey'
+
+
+GARGS = None
+KWARGS = None
+
+
+def dummy_handler(*args, **kwargs):
+    global GARGS
+    global KWARGS
+    GARGS = args
+    KWARGS = kwargs
+
 
 class TestKwargManager(TestCase):
     def test_empty_init(self):
@@ -186,7 +199,7 @@ class TestKwargManager(TestCase):
     def test_missing_argument(self):
         DummyKwargManager.reset_entries()
         obj = DummyKwargManager()
-        obj.register_entry('test1', ('x',))
+        obj.register_entry('test1', dummy_handler, ('x',))
         obj = DummyKwargManager(testkey='test1', x=2)
         self.assertEqual(obj.KWArgs, {'x': 2})
         try:
@@ -198,10 +211,38 @@ class TestKwargManager(TestCase):
     def test_2(self):
         DummyKwargManager.reset_entries()
         dobj = DummyKwargManager()
-        dobj.register_entry('test2', ('x', 'y'))
+        dobj.register_entry('test2', dummy_handler, ('x', 'y'))
         obj = DummyKwargManager(testkey='test2', x=1, y=2)
         self.assertDictEqual(obj.KWArgs, {'x': 1, 'y': 2})
         self.assertEqual(obj.ObjectType, 'test2')
+
+    def test_get(self):
+        DummyKwargManager.reset_entries()
+        dobj = DummyKwargManager()
+        dobj.register_entry('test2', dummy_handler, ('x', 'y'))
+        obj = DummyKwargManager(testkey='test2', x=1, y=2)
+        ttype, ddict = obj.get()
+        self.assertDictEqual(ddict, {'x': 1, 'y': 2})
+        self.assertEqual(ttype, 'test2')
+
+    def test_multiple(self):
+        DummyKwargManager.reset_entries()
+        dobj = DummyKwargManager()
+        dobj.register_entry('test2', dummy_handler, ('x', 'y'))
+        self.assertRaises(ValueError, dobj.register_entry, 'test2', dummy_handler, ('z'))
+
+    def test_call_1(self):
+        DummyKwargManager.reset_entries()
+        dobj = DummyKwargManager()
+        dobj.register_entry('test2', dummy_handler, ('x', 'y'))
+        obj = DummyKwargManager(testkey='test2', x=1, y=2)
+        obj.run(1)
+        global GARGS
+        global KWARGS
+        self.assertEqual((1, 'test2'), GARGS)
+        self.assertDictEqual({'x': 1, 'y': 2}, KWARGS)
+
+
 
 
 

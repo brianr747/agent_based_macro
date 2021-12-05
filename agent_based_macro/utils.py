@@ -194,6 +194,7 @@ class KwargManager(object):
     GRequired = {}
     GKey = 'type'
     GDocstrings = {}
+    GHandler = {}
     ErrorType = BadKeywordError
 
     def __init__(self, **kwargs):
@@ -212,7 +213,7 @@ class KwargManager(object):
             raise type(self).ErrorType(f'Missing required keyword {self.ObjectType} in {kwargs}')
         self.KWArgs = kwargs
 
-    def register_entry(self, key_name, required, docstring=''):
+    def register_entry(self, key_name, handler, required, docstring=''):
         """
         Register a new type of entry. Need to do this on an object, so we know what class to insert the
         new entry into.
@@ -224,10 +225,20 @@ class KwargManager(object):
         """
         if key_name in type(self).GRequired:
             raise ValueError(f'key name {key_name} already registered for this class')
+        type(self).GHandler[key_name] = handler
         type(self).GRequired[key_name] = required
         type(self).GDocstrings[key_name] = docstring
 
     def get(self):
         return self.ObjectType, self.KWArgs
+
+    def run(self, *args):
+        """
+        Run the handler. Positional args are objects that are passed to the handler (Simulation...)
+        :param args:
+        :param kwargs:
+        :return:
+        """
+        return type(self).GHandler[self.ObjectType](*args, self.ObjectType,  **self.KWArgs)
 
 

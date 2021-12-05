@@ -29,67 +29,18 @@ Copyright 2021 Brian Romanchuk
    limitations under the License.
 """
 
+from agent_based_macro.utils import KwargManager
 
 class ActionDataParameterError(ValueError):
     pass
 
 
-class ActionDataRequestHolder(object):
-    # Static member holding the registered queries.
+class ActionDataRequestHolder(KwargManager):
     GRequired = {}
-
-    def __init__(self, data_dict=None):
-        if data_dict is None:
-            self.DataDict = {}
-            return
-        if type(data_dict) is dict:
-            self.DataDict = data_dict
-        else:
-            # Assume it is another ActionDataRequestHolder
-            try:
-                self.DataDict = data_dict.DataDict
-            except:
-                raise ValueError('Must pass a dict or ActionDataRequestHolder to ActionDataRequestHolder to constructor')
-        self.assert_valid()
-
-    def assert_valid(self):
-        for k in self.DataDict:
-            self.assert_key_valid(k)
-
-    def assert_key_valid(self, kkey):
-        info = self.DataDict[kkey]
-        if 'request' not in info:
-            raise ActionDataParameterError('All Action data requests must include a "request" parameter')
-        if info['request'] not in ActionDataRequestHolder.GRequired:
-            raise ActionDataParameterError(f'Action data type "{info["request"]}" is not registered')
-        for param in ActionDataRequestHolder.GRequired[info["request"]]:
-            if param not in info:
-                raise ActionDataParameterError(f'Missing parameter {param} for Action data request {kkey}')
-
-    def add_request(self, kkey, request):
-        self.DataDict[kkey] = request
-        self.assert_key_valid(kkey)
+    GKey = 'request'
+    GDocstrings = {}
+    GHandler = {}
+    ErrorType = ActionDataParameterError
 
 
-def register_query(query, required, docstring=''):
-    """
-    Utility function to register a data request to the global registry
 
-    For now, not dealing with the doctsring
-    :param query: str
-    :param required: tuple
-    :param docstring: str
-    :return:
-    """
-    ActionDataRequestHolder.GRequired[query] = required
-
-
-# Global list of requests. More can be registered elsewhere.
-info = (
-    ('Productivity', ('commodity',), 'Get the productivity associated for a commodity'),
-    ('JG_Wage', tuple(), 'Get the JobGuarantee wage at the Agent''s location'),
-    ('CommodityID', ('commodity',), 'Get the GID of a commodity by name'),
-)
-
-for q, r, d in info:
-    register_query(q, r, d)

@@ -48,6 +48,7 @@ from agent_based_macro.entity import Entity, Action
 from agent_based_macro.orders import SellOrder, BuyOrder, MarketBase, OrderType
 from agent_based_macro.errors import NoMoneyError, NoFreeMoneyError, ReserveError
 import agent_based_macro.simulation as simulation
+from agent_based_macro.data_requests import ActionDataRequestHolder
 
 
 class Location(agent_based_macro.entity.Entity):
@@ -874,30 +875,30 @@ class BaseSimulation(simulation.Simulation):
         cgov = agent_based_macro.entity.Entity.get_entity(self.CentralGovernmentID)
         cgov.receive_money(amount)
 
-    def get_action_data(self, agent, **kwargs):
+    def get_action_data(self, agent, request, **kwargs):
         """
         Get requested data.
         :param agent: Agent
         :param args:
         :return:
         """
-        if kwargs['request'] == 'Productivity':
+        if request == 'Productivity':
             # FORMAT: 'Productivity', <commodity name or ID> -> productivity factor for agent's location.
             if type(kwargs['commodity']) is str:
                 commodity_id = self.get_commodity_by_name(kwargs['commodity'])
             else:
                 commodity_id = kwargs['commodity']
             return agent.get_productivity(commodity_id)
-        if kwargs['request'] == 'CommodityID':
+        if request == 'CommodityID':
             # Format: 'CommodityID', <commodity_name> -> commodity ID.
             return self.get_commodity_by_name(kwargs['commodity'])
-        if kwargs['request'] == 'JG_Wage':
+        if request == 'JG_Wage':
             loc_id = agent.LocationID
             JG = self.JGLookup[loc_id]
             return JG.Wage
-        raise ValueError(f'Unhandled Data Request: {kwargs["request"]}')
+        raise ValueError(f'Unhandled Data Request: {request}')
 
-    def process_action(self, agent, **kwargs):
+    def process_action(self, agent, action_type, **kwargs):
         """
         Handle actions associated with this class.
 
@@ -908,19 +909,19 @@ class BaseSimulation(simulation.Simulation):
         :return:
         """
         # Switch to match for Python 3.10
-        if kwargs['action_type'] == 'PayWages':
+        if action_type == 'PayWages':
             # We assume that there is only a single aggregated Household to get all wages.
             household_id = self.Households[agent.LocationID]
             household: HouseholdSector = agent_based_macro.entity.Entity.get_entity(household_id)
             amount = int(kwargs['payment'])
             agent.spend_money(amount=amount)
             household.receive_wages(amount=amount)
-        elif kwargs['action_type'] == 'ProductionLabour':
+        elif action_type == 'ProductionLabour':
             commodity = kwargs['commodity']
             num_workers = kwargs['num_workers']
             payment = kwargs['payment']
             self.action_production_labour(agent, commodity, num_workers, payment)
-        elif kwargs['action_type'] == 'AddNamedBuy':
+        elif action_type == 'AddNamedBuy':
             name = kwargs['name']
             commodity_id = kwargs['commodity_id']
             price = kwargs['price']
@@ -928,7 +929,7 @@ class BaseSimulation(simulation.Simulation):
             market = self.get_market(agent.LocationID, commodity_id)
             order = BuyOrder(price, amount, agent.GID)
             market.add_named_buy(agent, name, order)
-        elif kwargs['action_type'] == 'AddNamedSell':
+        elif action_type == 'AddNamedSell':
             name = kwargs['name']
             commodity_id = kwargs['commodity_id']
             price = kwargs['price']
@@ -936,7 +937,7 @@ class BaseSimulation(simulation.Simulation):
             market = self.get_market(agent.LocationID, commodity_id)
             order = SellOrder(price, amount, agent.GID)
             market.add_named_sell(agent, name, order)
-        elif kwargs['action_type'] == 'BuyNoKeep':
+        elif action_type == 'BuyNoKeep':
             commodity_id = kwargs['commodity_id']
             price = kwargs['price']
             amount = kwargs['amount']
@@ -952,7 +953,7 @@ class BaseSimulation(simulation.Simulation):
                     simulation.queue_event(event)
                 else:
                     raise
-        elif kwargs['action_type'] == 'SellNoKeep':
+        elif action_type == 'SellNoKeep':
             commodity_id = kwargs['commodity_id']
             price = kwargs['price']
             amount = kwargs['amount']
@@ -970,7 +971,7 @@ class BaseSimulation(simulation.Simulation):
                     raise
         else:
             # NOTE: Should not reach this point.
-            raise ValueError(f'Unknown Action arguments: {kwargs}')
+            raise ValueError(f'Unknown Action arguments: {action_type}')
 
     def action_production_labour(self, agent, commodity, num_workers, payment):
         """
@@ -1016,3 +1017,28 @@ class BaseSimulation(simulation.Simulation):
 
     def event_send_invalid_action(self, *args):
         raise ValueError('bink')
+
+
+def register_query(query, handler, required, docstring=''):
+    """
+    Utility function to register a data request to the global registry
+
+    For now, not dealing with the doctsring
+    :param query: str
+    :param required: tuple
+    :param docstring: str
+    :return:
+    """
+    obj = ActionDataRequestHolder()
+    obj.register_entry(query, handler, required, docstring)
+
+
+# Global list of requests. More can be registered elsewhere.
+info = (
+    ('Productivity', BaseSimulation.get_action_data, ('commodity',), 'Get the productivity associated for a commodity'),
+    ('JG_Wage', BaseSimulation.get_action_data, tuple(), 'Get the JobGuarantee wage at the Agent''s location'),
+    ('CommodityID',BaseSimulation.get_action_data,  ('commodity',), 'Get the GID of a commodity by name'),
+)
+
+for q, h, r, d in info:
+    register_query(q, h, r, d)
