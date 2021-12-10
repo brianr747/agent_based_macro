@@ -18,7 +18,7 @@ Copyright 2021 Brian Romanchuk
 
 
 import math
-
+from typing import Type
 
 G_LAST_JITTER = 0
 # Create the jitter matrix. Done once on import
@@ -245,5 +245,17 @@ class KwargManager(object):
         :return:
         """
         return type(self).GHandler[self.ObjectType](*args, self.ObjectType,  **self.KWArgs)
+
+
+    def dump_registered(self): # pragma:no cover
+        """
+        Dump all the information registered in the subclass associated with the object.
+        :return:
+        """
+        mytype: Type[KwargManager] = type(self)
+        print(f'Type identifier: "{mytype.GKey}"')
+        print('Registered Entries:')
+        for key in mytype.GRequired:
+            print(key, mytype.GRequired[key], mytype.GDocstrings[key])
 
 

@@ -163,11 +163,11 @@ class Client(object):
         self.Simulation.ClientCommands.append(cmd)
 
 
-class Simulation(ABC, Entity):
+class Simulation(Entity):
     """
     Simulation object, to be run by server (or main loop)
 
-    This is an abstract base class. Subclasses must override the @abstractmethod
+    This could be an abstract base class, but will leave it as non-abstract since it is easier to create tests.
 
     Base class handles low level processing, and control of time. The entities within the simulation do all the work...
     """
@@ -370,7 +370,6 @@ class Simulation(ABC, Entity):
             action = ent.ActionQueue.pop(0)
             action.run(self, ent)
 
-    @abstractmethod
     def get_action_data(self, agent, request, **kwargs):
         """
         Function that needs to be overriden by subclasses to do data fetching. Each simulation will

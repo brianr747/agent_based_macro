@@ -23,9 +23,80 @@ Copyright 2021 Brian Romanchuk
 """
 
 import time
+from agent_based_macro.utils import KwargManager
+
+
+class InvalidMessageArguments(ValueError):
+    pass
+
+
+class Server(object):
+    """
+    Server class. Embeds a simulation, and handles client communication
+    """
+    def __init__(self):
+        self.Simulation = None
+        self.ClientIDList = []
+        self.SimulationMessages = set()
+        # These variables have clunky names, but want to underline which are going out/in.
+        self.IncomingClientMessages = []
+        self.OutgoingServerMessages = []
+
+    def add_simulation(self, sim):
+        if self.Simulation is not None:
+            raise ValueError('Cannot replace a simulation')
+        self.Simulation = sim
+
+    def register_message_type(self, is_simulation_message, message_type, handler, required, docstring=''):
+        """
+        Add a new ServerMessage type.
+        Although standard when compared to other KwargManager subclass registry calls, is_simulation_message
+        is a new parameter for this type. Since messages can either be handled by the server or passed on
+        to the simulation, we need to mark which one to dispatch to.
+
+        :param message_type: str
+        :param handler: function
+        :param is_simulation_message: bool
+        :param required: tuple
+        :param docstring: str
+        :return:
+        """
+        obj = ServerMessage()
+        obj.register_entry(message_type, handler, required, docstring)
+        if is_simulation_message:
+            self.SimulationMessages.add(message_type)
+
+    def add_message(self, client_id, msg):
+        """
+        Add a message to the outgoing message queue. Insert the client_id as a parameter.
+        :param client_id: int
+        :param msg: ServerMessage
+        :return:
+        """
+        msg.client_id = client_id
+        self.OutgoingServerMessages.append(msg)
+
+
+class ServerMessage(KwargManager):
+    """
+    Messages *sent by the server*.
+    """
+    GRequired = {}
+    GKey = 'message_type'
+    GDocstrings = {}
+    GHandler = {}
+    ErrorType = InvalidMessageArguments
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        # This is set by the Server.add_message() call.
+        self.client_id = None
 
 
 class ClientServerMsg(object):
+    """
+    This class is deprecated
+    """
     def __init__(self, **kwargs):
         """
         Create the object with the arguments to be passed to the callback.

@@ -203,7 +203,7 @@ class TestKwargManager(TestCase):
         obj = DummyKwargManager(testkey='test1', x=2)
         self.assertEqual(obj.KWArgs, {'x': 2})
         try:
-            DummyKwargManager(testkey='test2', y=3)
+            DummyKwargManager(testkey='test1', y=3)
             self.fail('should have thrown an exception')
         except DummyKeywordError:
             pass
