@@ -95,11 +95,22 @@ class ProducerLabour(ProductionAgent):
         self.time_series_set('money', self.Money)
         fud_id = self.ActionData['FudID']
         unit_cost = self.unit_cost(fud_id)
-        # Aim for a 10% profit margin
-        amount = math.ceil(self.Inventory[fud_id].Amount*.99)
-        if amount > 0:
-            self.add_action(action_type='AddNamedSell', name='production', commodity_id=fud_id,
-                            price=unit_cost * 1.1, amount=amount)
+        inventory = self.Inventory[fud_id].Amount
+        amount = inventory
+        if amount == 0:
+            return
+        production = self.get_daily_production(fud_id)
+        ratio = float(inventory)/float(production)
+        if ratio < 2.:
+            # Low inventories, so hold a small amount back.
+            amount = math.ceil(inventory * .8)
+            target_margin = 1.2 # 20% profit margin
+        elif ratio < 2.5:
+            target_margin = 1.1
+        else:
+            target_margin = 1.05
+        self.add_action(action_type='AddNamedSell', name='production', commodity_id=fud_id,
+                        price=int(unit_cost * target_margin), amount=amount)
 
 
 class TravellingAgent(Agent):
@@ -368,7 +379,7 @@ class JobGuarantee(ProductionAgent):
         available = self.Inventory[food_id].Amount - self.Inventory[food_id].Reserved
         production_amount = int(available*0.7)
         self.add_action(action_type='AddNamedSell', name='production', commodity_id=food_id,
-                        price=production_price * 1.1, amount=production_amount)
+                        price=production_price * 1.2, amount=production_amount)
         self.time_series_set('production', production_price * 1.1 * production_amount)
         remainder = available - production_amount
         self.add_action(action_type='AddNamedSell', name='emergency', commodity_id=food_id, price=production_price * 1.5,

@@ -47,7 +47,7 @@ Copyright 2021 Brian Romanchuk
    See the License for the specific language governing permissions and
    limitations under the License.
 """
-
+import inspect
 from bisect import insort_right
 import time
 import math
@@ -359,7 +359,25 @@ class Simulation(Entity):
         for name, request in event.DataRequests:
             ent.ActionData[name] = request.run(self, ent)
         # Run the callback
-        event.Callback(**event.KWArgs)
+        try:
+            event.Callback(**event.KWArgs)
+        except TypeError:
+            # It is very hard to see what happens if the callback profile is messed up, since
+            # is unclear what function is attempted to be called. (Yes, I ran into this.)
+            # This code will attempt to print a diagnostic.
+            # Note that if the underlying code throws a TypeError, this diagnostic will be printed
+            srcfile = 'Unknown file'
+            lineno = '?'
+            # Add this for debugging, to see if this helps
+            try:
+                _, lineno = inspect.getsourcelines(event.Callback)
+                srcfile = inspect.getsourcefile(event.Callback)
+            except:
+                pass
+            print('Error calling event.Callback(), trying to call:')
+            print("{!r} comes from {!r}, line {}".format(event.Callback, srcfile, lineno))
+            print('Note: Ignore this message if the TypeError is not triggered by bad arguments to a callback')
+            raise
         # Then, do the requested actions.
         cnt = 0
         while len(ent.ActionQueue) > 0:

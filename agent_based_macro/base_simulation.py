@@ -724,12 +724,14 @@ class Market(agent_based_macro.entity.Entity, MarketBase):
         info = super().get_representation()
         info['Location'] = self.LocationID
         info['CommodityID'] = self.CommodityID
+        info['BuyQueue'] = [(x.Price, x.Amount, x.FirmGID) for x in self.BuyList]
         if len(self.BuyList) > 0:
             info['BidPrice'] = self.BuyList[0].Price
             info['BidSize'] = self.BuyList[0].Amount
         else:
             info['BidPrice'] = None
             info['BidSize'] = None
+        info['SellQueue'] = [(x.Price, x.Amount, x.FirmGID) for x in self.SellList]
         if len(self.SellList) > 0:
             info['AskPrice'] = self.SellList[0].Price
             info['AskSize'] = self.SellList[0].Amount
@@ -820,6 +822,7 @@ class BaseSimulation(simulation.Simulation):
         obj.register_entry('buy', None, ('commodity_id', 'price', 'amount'))
         obj.register_entry('sell', None, ('commodity_id', 'price', 'amount'))
         obj.register_entry('move_ship', None, ('new_target', 'ttime'))
+        obj.register_entry('send_error', None, ('response', ))
 
 
     def add_location(self, location):
@@ -975,7 +978,7 @@ class BaseSimulation(simulation.Simulation):
             except errors.CommodityReserveError:
                 if agent.GID in self.PlayerGID:
                     event = simulation.Event(self.GID, self.event_send_invalid_action, self.Time, None,
-                                             response='NotEnoughCommodity')
+                                             response='NotEnoughCommodity', event_type='send_error')
                     simulation.queue_event(event)
                 else:
                     raise
@@ -1025,8 +1028,21 @@ class BaseSimulation(simulation.Simulation):
         msg = '\t'.join(elems)
         self.log_msg('transactions', msg)
 
-    def event_send_invalid_action(self, *args):
-        raise ValueError('bink')
+    def event_send_invalid_action(self, **kwargs):
+        """
+        Has an entity attempted to do something invalid?
+
+        If we are just running a simulation, this is a sign of bad logic somewhere.
+
+        In a client-server framework, we should expect players to attempt things that are invalid, since authentication
+        is server side.
+
+        The sub-class of this simulation needs to override this method and handle the messaging protocol.
+
+        :param kwargs:
+        :return:
+        """
+        raise NotImplementedError('Sub-classes need to handle responses to invalid commands')
 
 
 def register_query(query, handler, required, docstring=''):
