@@ -154,7 +154,11 @@ class TravellingAgent(Agent):
                 return self.TargetCoordinates
             else:
                 # progess is in [0,1]
-                progress = (ttime - self.StartTime) / (self.ArrivalTime - self.StartTime)
+                try:
+                    progress = (ttime - self.StartTime) / (self.ArrivalTime - self.StartTime)
+                except ZeroDivisionError:
+                    # Not sure how we get here, but it happens. Bug report by Twitter user @0InterestMath
+                    progress = 0.
                 # Support N-dimensional spaces
                 out = [s + progress * (t - s) for s, t in zip(self.StartCoordinates, self.TargetCoordinates)]
                 return tuple(out)
